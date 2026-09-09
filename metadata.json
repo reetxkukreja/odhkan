@@ -1,0 +1,6 @@
+{
+  "name": "ODHKAN",
+  "description": "Random people. One college. More connections. Odhkan brings students from across your college together in small groups so you can meet people outside your usual circle.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

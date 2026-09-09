@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 320" fill="none">
+  <defs>
+    <filter id="subtle-shadow" x="-5%" y="-5%" width="110%" height="110%">
+      <feDropShadow dx="0" dy="2" stdDeviation="3" flood-opacity="0.15" />
+    </filter>
+  </defs>
+  
+  <!-- Red background container matching uploaded image -->
+  <rect width="600" height="320" rx="28" fill="#E11D1E" />
+  
+  <!-- Playful, chunky hand-cut ODHKAN typography -->
+  <g fill="#FAF8F5" transform="translate(45, 55)">
+    <!-- O -->
+    <path d="M42 28 C78 26 102 38 108 72 C114 104 106 142 98 164 C86 194 56 204 26 198 C-2 192 -12 162 -12 128 C-12 78 8 30 42 28 Z M48 85 C32 88 28 104 28 126 C28 148 38 158 54 154 C70 150 74 134 74 112 C74 90 64 82 48 85 Z" />
+    
+    <!-- D -->
+    <path d="M96 35 L148 24 C178 18 202 36 208 70 C214 104 206 146 190 176 C176 202 148 212 118 208 L84 212 L96 35 Z M132 78 L124 162 C138 164 150 156 156 138 C164 116 166 94 158 82 C152 74 142 76 132 78 Z" />
+    
+    <!-- H -->
+    <path d="M192 12 L234 8 L220 78 L262 68 L274 6 L316 2 L292 208 L250 212 L258 124 L212 136 L202 216 L160 218 L192 12 Z" />
+    
+    <!-- K -->
+    <path d="M302 4 L344 0 L328 88 L386 20 L434 26 L368 108 L440 206 L390 210 L334 126 L320 212 L278 214 L302 4 Z" />
+    
+    <!-- A -->
+    <path d="M424 16 L476 10 L514 204 L472 208 L460 152 L424 156 L414 212 L372 214 L424 16 Z M444 68 L430 118 L454 116 L444 68 Z" />
+    
+    <!-- N -->
+    <path d="M492 8 L534 4 L576 144 L580 12 L620 8 L602 212 L562 216 L522 74 L518 214 L478 214 L492 8 Z" transform="scale(0.82) translate(80, 0)" />
+  </g>
+</svg>

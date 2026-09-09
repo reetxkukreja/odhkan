@@ -1,0 +1,378 @@
+{
+  "registrations": [
+    {
+      "id": "reg_1_24bd1234",
+      "name": "Reet Kukreja",
+      "rollNumber": "24BD1234",
+      "batch": "24BD",
+      "registeredAt": 1788757918263,
+      "status": "valid",
+      "groupId": null
+    },
+    {
+      "id": "reg_2_24bd1234",
+      "name": "Reet K",
+      "rollNumber": "24BD1234",
+      "batch": "24BD",
+      "registeredAt": 1788758218263,
+      "status": "duplicate",
+      "flagReason": "Duplicate roll number 24BD1234",
+      "duplicateOfRoll": "24BD1234",
+      "groupId": null
+    },
+    {
+      "id": "reg_3_23bd5678",
+      "name": "Aarav Shah",
+      "rollNumber": "23BD5678",
+      "batch": "23BD",
+      "registeredAt": 1788758518263,
+      "status": "valid",
+      "groupId": null
+    },
+    {
+      "id": "reg_4_23bd5678",
+      "name": "Aarav Shah",
+      "rollNumber": "23BD5678",
+      "batch": "23BD",
+      "registeredAt": 1788758818263,
+      "status": "duplicate",
+      "flagReason": "Duplicate roll number 23BD5678",
+      "duplicateOfRoll": "23BD5678",
+      "groupId": null
+    },
+    {
+      "id": "reg_5_24bd003",
+      "name": "Ananya Sharma",
+      "rollNumber": "24BD003",
+      "batch": "24BD",
+      "registeredAt": 1788759118263,
+      "status": "valid",
+      "groupId": null
+    },
+    {
+      "id": "reg_6_24bd004",
+      "name": "Kabir Mehta",
+      "rollNumber": "24BD004",
+      "batch": "24BD",
+      "registeredAt": 1788759418263,
+      "status": "valid",
+      "groupId": null
+    },
+    {
+      "id": "reg_7_24bd005",
+      "name": "Diya Singhania",
+      "rollNumber": "24BD005",
+      "batch": "24BD",
+      "registeredAt": 1788759718263,
+      "status": "valid",
+      "groupId": null
+    },
+    {
+      "id": "reg_8_24bd006",
+      "name": "Devansh Roy",
+      "rollNumber": "24BD006",
+      "batch": "24BD",
+      "registeredAt": 1788760018263,
+      "status": "valid",
+      "groupId": null
+    },
+    {
+      "id": "reg_9_24bd007",
+      "name": "Isha Nair",
+      "rollNumber": "24BD007",
+      "batch": "24BD",
+      "registeredAt": 1788760318263,
+      "status": "valid",
+      "groupId": null
+    },
+    {
+      "id": "reg_10_24bd008",
+      "name": "Reyansh Gupta",
+      "rollNumber": "24BD008",
+      "batch": "24BD",
+      "registeredAt": 1788760618263,
+      "status": "valid",
+      "groupId": null
+    },
+    {
+      "id": "reg_11_24bd009",
+      "name": "Tara Deshmukh",
+      "rollNumber": "24BD009",
+      "batch": "24BD",
+      "registeredAt": 1788760918263,
+      "status": "valid",
+      "groupId": null
+    },
+    {
+      "id": "reg_12_24bd010",
+      "name": "Yash Vardhan",
+      "rollNumber": "24BD010",
+      "batch": "24BD",
+      "registeredAt": 1788761218263,
+      "status": "valid",
+      "groupId": null
+    },
+    {
+      "id": "reg_13_24bd011",
+      "name": "Meera Chawla",
+      "rollNumber": "24BD011",
+      "batch": "24BD",
+      "registeredAt": 1788761518263,
+      "status": "valid",
+      "groupId": null
+    },
+    {
+      "id": "reg_14_23bd001",
+      "name": "Dhruv Patel",
+      "rollNumber": "23BD001",
+      "batch": "23BD",
+      "registeredAt": 1788762118263,
+      "status": "valid",
+      "groupId": null
+    },
+    {
+      "id": "reg_15_23bd002",
+      "name": "Rohan Verma",
+      "rollNumber": "23BD002",
+      "batch": "23BD",
+      "registeredAt": 1788762418263,
+      "status": "valid",
+      "groupId": null
+    },
+    {
+      "id": "reg_16_23bd003",
+      "name": "Tanvi Sen",
+      "rollNumber": "23BD003",
+      "batch": "23BD",
+      "registeredAt": 1788762718263,
+      "status": "valid",
+      "groupId": null
+    },
+    {
+      "id": "reg_17_23bd004",
+      "name": "Arjun Nambiar",
+      "rollNumber": "23BD004",
+      "batch": "23BD",
+      "registeredAt": 1788763018263,
+      "status": "valid",
+      "groupId": null
+    },
+    {
+      "id": "reg_18_23bd005",
+      "name": "Sanya Kapoor",
+      "rollNumber": "23BD005",
+      "batch": "23BD",
+      "registeredAt": 1788763318263,
+      "status": "valid",
+      "groupId": null
+    },
+    {
+      "id": "reg_19_23bd006",
+      "name": "Vihaan Malhotra",
+      "rollNumber": "23BD006",
+      "batch": "23BD",
+      "registeredAt": 1788763618263,
+      "status": "valid",
+      "groupId": null
+    },
+    {
+      "id": "reg_20_23bd007",
+      "name": "Rhea Kulkarni",
+      "rollNumber": "23BD007",
+      "batch": "23BD",
+      "registeredAt": 1788763918263,
+      "status": "valid",
+      "groupId": null
+    },
+    {
+      "id": "reg_21_23bd008",
+      "name": "Aditya Birla",
+      "rollNumber": "23BD008",
+      "batch": "23BD",
+      "registeredAt": 1788764218263,
+      "status": "valid",
+      "groupId": null
+    },
+    {
+      "id": "reg_22_23bd009",
+      "name": "Pooja Hegde",
+      "rollNumber": "23BD009",
+      "batch": "23BD",
+      "registeredAt": 1788764518263,
+      "status": "valid",
+      "groupId": null
+    },
+    {
+      "id": "reg_23_23bd011",
+      "name": "Avani Joshi",
+      "rollNumber": "23BD011",
+      "batch": "23BD",
+      "registeredAt": 1788764818263,
+      "status": "valid",
+      "groupId": null
+    },
+    {
+      "id": "reg_24_22bd001",
+      "name": "Zoya Akhtar",
+      "rollNumber": "22BD001",
+      "batch": "22BD",
+      "registeredAt": 1788765118263,
+      "status": "valid",
+      "groupId": null
+    },
+    {
+      "id": "reg_25_22bd002",
+      "name": "Ishaan Khattar",
+      "rollNumber": "22BD002",
+      "batch": "22BD",
+      "registeredAt": 1788765418263,
+      "status": "valid",
+      "groupId": null
+    },
+    {
+      "id": "reg_26_22bd003",
+      "name": "Mallika Dua",
+      "rollNumber": "22BD003",
+      "batch": "22BD",
+      "registeredAt": 1788765718263,
+      "status": "valid",
+      "groupId": null
+    },
+    {
+      "id": "reg_27_22bd004",
+      "name": "Samar Rao",
+      "rollNumber": "22BD004",
+      "batch": "22BD",
+      "registeredAt": 1788766018263,
+      "status": "valid",
+      "groupId": null
+    },
+    {
+      "id": "reg_28_22bd005",
+      "name": "Nandini Das",
+      "rollNumber": "22BD005",
+      "batch": "22BD",
+      "registeredAt": 1788766318263,
+      "status": "valid",
+      "groupId": null
+    },
+    {
+      "id": "reg_29_22bd006",
+      "name": "Pranav Swaminathan",
+      "rollNumber": "22BD006",
+      "batch": "22BD",
+      "registeredAt": 1788766618263,
+      "status": "valid",
+      "groupId": null
+    },
+    {
+      "id": "reg_30_22bd007",
+      "name": "Kavya Madhavan",
+      "rollNumber": "22BD007",
+      "batch": "22BD",
+      "registeredAt": 1788766918263,
+      "status": "valid",
+      "groupId": null
+    },
+    {
+      "id": "reg_31_22bd008",
+      "name": "Tushar Sethi",
+      "rollNumber": "22BD008",
+      "batch": "22BD",
+      "registeredAt": 1788767218263,
+      "status": "valid",
+      "groupId": null
+    },
+    {
+      "id": "reg_32_22bd009",
+      "name": "Alisha Chinai",
+      "rollNumber": "22BD009",
+      "batch": "22BD",
+      "registeredAt": 1788767518263,
+      "status": "valid",
+      "groupId": null
+    },
+    {
+      "id": "reg_33_22bd010",
+      "name": "Gautam Gambhir",
+      "rollNumber": "22BD010",
+      "batch": "22BD",
+      "registeredAt": 1788767818263,
+      "status": "valid",
+      "groupId": null
+    },
+    {
+      "id": "reg_34_25bd001",
+      "name": "Krishav Saxena",
+      "rollNumber": "25BD001",
+      "batch": "25BD",
+      "registeredAt": 1788768118263,
+      "status": "valid",
+      "groupId": null
+    },
+    {
+      "id": "reg_35_25bd002",
+      "name": "Siya Ram",
+      "rollNumber": "25BD002",
+      "batch": "25BD",
+      "registeredAt": 1788768418263,
+      "status": "valid",
+      "groupId": null
+    },
+    {
+      "id": "reg_36_25bd003",
+      "name": "Neil Bhattacharya",
+      "rollNumber": "25BD003",
+      "batch": "25BD",
+      "registeredAt": 1788768718263,
+      "status": "valid",
+      "groupId": null
+    },
+    {
+      "id": "reg_37_25bd004",
+      "name": "Pari Mathur",
+      "rollNumber": "25BD004",
+      "batch": "25BD",
+      "registeredAt": 1788769018263,
+      "status": "valid",
+      "groupId": null
+    },
+    {
+      "id": "reg_38_25bd005",
+      "name": "Aryan Agarwal",
+      "rollNumber": "25BD005",
+      "batch": "25BD",
+      "registeredAt": 1788769318263,
+      "status": "valid",
+      "groupId": null
+    },
+    {
+      "id": "reg_39_25bd006",
+      "name": "Lavanya Menon",
+      "rollNumber": "25BD006",
+      "batch": "25BD",
+      "registeredAt": 1788769618263,
+      "status": "valid",
+      "groupId": null
+    },
+    {
+      "id": "reg_40_25bd007",
+      "name": "Hridhaan Bansal",
+      "rollNumber": "25BD007",
+      "batch": "25BD",
+      "registeredAt": 1788769918263,
+      "status": "valid",
+      "groupId": null
+    }
+  ],
+  "groups": [],
+  "event": {
+    "stage": "REGISTRATION_OPEN",
+    "revealTime": "2026-09-11T09:30:00.000Z",
+    "registrationOpen": true,
+    "groupsLocked": false,
+    "isPublished": false,
+    "publishedAt": null
+  },
+  "lastMixedAt": null
+}
