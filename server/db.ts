@@ -1,5 +1,9 @@
-import fs from 'fs';
-import path from 'path';
+import {
+  isPostgresConfigured,
+  initPostgresSchema,
+  query,
+  getClient,
+} from './postgres';
 
 export interface Registration {
   id: string;
@@ -101,49 +105,39 @@ export interface DatabaseSchema {
   lastMixedAt: number | null;
 }
 
-const DATA_DIR = path.join(process.cwd(), 'data');
-const DATA_FILE = path.join(DATA_DIR, 'odhkan-db.json');
-
 // Calculate next Friday at 3:00 PM IST (UTC+5:30)
 export function getNextFriday3PMIST(): Date {
   const now = new Date();
   const istOffsetMs = 5.5 * 60 * 60 * 1000;
   const nowIST = new Date(now.getTime() + istOffsetMs);
-  
+
   const dayOfWeek = nowIST.getUTCDay(); // 0 is Sunday, 5 is Friday
   const currentHour = nowIST.getUTCHours();
   const currentMinute = nowIST.getUTCMinutes();
-  
+
   let daysUntilFriday = (5 - dayOfWeek + 7) % 7;
-  
+
   if (daysUntilFriday === 0 && (currentHour > 15 || (currentHour === 15 && currentMinute >= 0))) {
     daysUntilFriday = 7;
   }
-  
+
   const targetIST = new Date(nowIST);
   targetIST.setUTCDate(nowIST.getUTCDate() + daysUntilFriday);
   targetIST.setUTCHours(15, 0, 0, 0); // 15:00 IST
-  
+
   return new Date(targetIST.getTime() - istOffsetMs);
 }
 
 // 40 seed registrations with exactly 38 unique participants and 2 duplicate entries
-// Includes valid normalized Indian mobile numbers and active status
 export function getInitialSeedRegistrations(): Registration[] {
   const baseTime = Date.now() - 36 * 3600 * 1000;
 
   const rawSeeds = [
-    // 1. Reet Kukreja (Original)
     { name: 'Reet Kukreja', roll: '24BD1234', batch: '24BD', offsetMins: 10, phone: '+919876543201' },
-    // 2. Reet K (Duplicate with same roll number 24BD1234)
     { name: 'Reet K', roll: '24BD1234', batch: '24BD', offsetMins: 15, isDup: true, reason: 'Duplicate roll number 24BD1234', phone: '+919876543201' },
-    
-    // 3. Aarav Shah (Original)
     { name: 'Aarav Shah', roll: '23BD5678', batch: '23BD', offsetMins: 20, phone: '+919876543202' },
-    // 4. Aarav Shah (Duplicate registration)
     { name: 'Aarav Shah', roll: '23BD5678', batch: '23BD', offsetMins: 25, isDup: true, reason: 'Duplicate roll number 23BD5678', phone: '+919876543202' },
 
-    // Remaining 36 unique students across 22BD, 23BD, 24BD, 25BD
     { name: 'Ananya Sharma', roll: '24BD003', batch: '24BD', offsetMins: 30, phone: '+919876543203' },
     { name: 'Kabir Mehta', roll: '24BD004', batch: '24BD', offsetMins: 35, phone: '+919876543204' },
     { name: 'Diya Singhania', roll: '24BD005', batch: '24BD', offsetMins: 40, phone: '+919876543205' },
@@ -154,7 +148,6 @@ export function getInitialSeedRegistrations(): Registration[] {
     { name: 'Yash Vardhan', roll: '24BD010', batch: '24BD', offsetMins: 65, phone: '+919876543210' },
     { name: 'Meera Chawla', roll: '24BD011', batch: '24BD', offsetMins: 70, phone: '+919876543211' },
 
-    // 23BD
     { name: 'Dhruv Patel', roll: '23BD001', batch: '23BD', offsetMins: 80, phone: '+919876543212' },
     { name: 'Rohan Verma', roll: '23BD002', batch: '23BD', offsetMins: 85, phone: '+919876543213' },
     { name: 'Tanvi Sen', roll: '23BD003', batch: '23BD', offsetMins: 90, phone: '+919876543214' },
@@ -166,7 +159,6 @@ export function getInitialSeedRegistrations(): Registration[] {
     { name: 'Pooja Hegde', roll: '23BD009', batch: '23BD', offsetMins: 120, phone: '+919876543220' },
     { name: 'Avani Joshi', roll: '23BD011', batch: '23BD', offsetMins: 125, phone: '+919876543221' },
 
-    // 22BD
     { name: 'Zoya Akhtar', roll: '22BD001', batch: '22BD', offsetMins: 130, phone: '+919876543222' },
     { name: 'Ishaan Khattar', roll: '22BD002', batch: '22BD', offsetMins: 135, phone: '+919876543223' },
     { name: 'Mallika Dua', roll: '22BD003', batch: '22BD', offsetMins: 140, phone: '+919876543224' },
@@ -178,7 +170,6 @@ export function getInitialSeedRegistrations(): Registration[] {
     { name: 'Alisha Chinai', roll: '22BD009', batch: '22BD', offsetMins: 170, phone: '+919876543230' },
     { name: 'Gautam Gambhir', roll: '22BD010', batch: '22BD', offsetMins: 175, phone: '+919876543231' },
 
-    // 25BD
     { name: 'Krishav Saxena', roll: '25BD001', batch: '25BD', offsetMins: 180, phone: '+919876543232' },
     { name: 'Siya Ram', roll: '25BD002', batch: '25BD', offsetMins: 185, phone: '+919876543233' },
     { name: 'Neil Bhattacharya', roll: '25BD003', batch: '25BD', offsetMins: 190, phone: '+919876543234' },
@@ -209,42 +200,33 @@ export function getInitialSeedRegistrations(): Registration[] {
   });
 }
 
+function mapRowToRegistration(row: any): Registration {
+  return {
+    id: row.id,
+    name: row.name,
+    rollNumber: row.roll_number,
+    batch: row.batch,
+    phoneNumber: row.phone_number,
+    createdAt: Number(row.created_at),
+    updatedAt: Number(row.updated_at),
+    registeredAt: Number(row.registered_at),
+    status: row.status === 'valid' ? 'active' : row.status,
+    withdrawnStage: row.withdrawn_stage || undefined,
+    withdrawnAt: row.withdrawn_at ? Number(row.withdrawn_at) : null,
+    flagReason: row.flag_reason || undefined,
+    duplicateOfRoll: row.duplicate_of_roll || undefined,
+    groupId: row.group_id || null,
+    groupAssigned: Boolean(row.group_assigned || row.group_id),
+    revealed: Boolean(row.revealed),
+  };
+}
+
 class Database {
-  private data: DatabaseSchema;
+  private inMemoryData: DatabaseSchema;
 
   constructor() {
-    this.data = this.loadData();
-  }
-
-  private loadData(): DatabaseSchema {
-    try {
-      if (!fs.existsSync(DATA_DIR)) {
-        fs.mkdirSync(DATA_DIR, { recursive: true });
-      }
-
-      if (fs.existsSync(DATA_FILE)) {
-        const fileContent = fs.readFileSync(DATA_FILE, 'utf-8');
-        const parsed = JSON.parse(fileContent);
-        if (parsed.registrations && Array.isArray(parsed.registrations)) {
-          // Normalize older schema fields to current standard
-          parsed.registrations.forEach((r: any, idx: number) => {
-            if (r.status === 'valid') r.status = 'active';
-            if (!r.phoneNumber) r.phoneNumber = `+91987654${(3200 + idx).toString().slice(-4)}`;
-            if (!r.createdAt) r.createdAt = r.registeredAt || Date.now();
-            if (!r.updatedAt) r.updatedAt = r.registeredAt || Date.now();
-            if (r.groupAssigned === undefined) r.groupAssigned = Boolean(r.groupId);
-            if (r.revealed === undefined) r.revealed = false;
-          });
-          return parsed;
-        }
-      }
-    } catch (err) {
-      console.error('Error loading DB file:', err);
-    }
-
-    const initialRegistrations = getInitialSeedRegistrations();
-    const initial: DatabaseSchema = {
-      registrations: initialRegistrations,
+    this.inMemoryData = {
+      registrations: getInitialSeedRegistrations(),
       groups: [],
       event: {
         stage: 'REGISTRATION_OPEN',
@@ -256,18 +238,17 @@ class Database {
       },
       lastMixedAt: null,
     };
-    this.saveData(initial);
-    return initial;
   }
 
-  private saveData(dataToSave?: DatabaseSchema): void {
-    try {
-      if (!fs.existsSync(DATA_DIR)) {
-        fs.mkdirSync(DATA_DIR, { recursive: true });
-      }
-      fs.writeFileSync(DATA_FILE, JSON.stringify(dataToSave || this.data, null, 2), 'utf-8');
-    } catch (err) {
-      console.error('Failed to save DB file:', err);
+  // Database initialization on server start
+  public async init(): Promise<void> {
+    if (isPostgresConfigured()) {
+      console.log('[Database] Connecting to PostgreSQL via DATABASE_URL...');
+      await initPostgresSchema(getNextFriday3PMIST().toISOString());
+    } else {
+      console.warn(
+        '[Database] Notice: DATABASE_URL is not set. Running with zero-disk in-memory storage. In production, configure DATABASE_URL for PostgreSQL persistence.'
+      );
     }
   }
 
@@ -282,7 +263,6 @@ class Database {
       return { valid: false, normalizedRoll: normalized, batch: '' };
     }
 
-    // Standard college batch extract (e.g. 24BDXXXX -> 24BD)
     const match = normalized.match(/^(\d{2}[A-Z]{2,3})/);
     if (match) {
       return {
@@ -292,7 +272,6 @@ class Database {
       };
     }
 
-    // Generic fallback for any valid student roll
     const digitsOnly = normalized.replace(/\D/g, '');
     if (digitsOnly.length >= 2) {
       return {
@@ -306,18 +285,12 @@ class Database {
   }
 
   // Phone Number Validation & Normalization for Indian Mobile Numbers
-  // Accepts 9876543210, +919876543210, +91 98765 43210, 09876543210, 919876543210
-  // Normalizes to consistent: +919876543210
   public normalizePhoneNumber(rawPhone: string): { valid: boolean; normalizedPhone: string } {
     if (!rawPhone || typeof rawPhone !== 'string') {
       return { valid: false, normalizedPhone: '' };
     }
 
-    // Strip spaces, dashes, parentheses, dots
     const cleaned = rawPhone.replace(/[\s\-\(\)\.]/g, '');
-
-    // Indian mobile numbers have 10 digits starting with 6, 7, 8, or 9
-    // Optional prefix: +91, 91, or 0
     const match = cleaned.match(/^(?:\+91|91|0)?([6-9]\d{9})$/);
     if (match && match[1]) {
       return { valid: true, normalizedPhone: `+91${match[1]}` };
@@ -326,81 +299,251 @@ class Database {
     return { valid: false, normalizedPhone: '' };
   }
 
-  // Active participant count (status === 'active' or legacy 'valid')
-  // Requirement 6 & 24: ONLY active participants are counted!
-  public getActiveCount(): number {
-    return this.data.registrations.filter(r => r.status === 'active' || r.status === 'valid').length;
+  // Active participant count
+  public async getActiveCount(): Promise<number> {
+    if (isPostgresConfigured()) {
+      const res = await query(
+        `SELECT COUNT(*)::int as count FROM registrations WHERE status IN ('active', 'valid');`
+      );
+      return res.rows[0]?.count || 0;
+    }
+    return this.inMemoryData.registrations.filter(r => r.status === 'active' || r.status === 'valid').length;
   }
 
   // 1. Public Status - Live Counter
-  // Shows strictly active participants and reveal countdown
-  public getPublicStatus() {
-    const activeCount = this.getActiveCount();
-    const isOverdue = new Date(this.data.event.revealTime).getTime() <= Date.now();
-    const isRevealed = this.data.event.isPublished || (isOverdue && this.data.event.groupsLocked);
+  public async getPublicStatus(): Promise<{
+    totalCount: number;
+    eventStatus: string;
+    revealTime: string;
+    isRevealed: boolean;
+    groupsCount: number;
+    registrationOpen: boolean;
+  }> {
+    if (isPostgresConfigured()) {
+      const activeRes = await query(
+        `SELECT COUNT(*)::int as count FROM registrations WHERE status IN ('active', 'valid');`
+      );
+      const activeCount = activeRes.rows[0]?.count || 0;
+
+      const groupRes = await query(`SELECT COUNT(*)::int as count FROM groups;`);
+      const groupsCount = groupRes.rows[0]?.count || 0;
+
+      const eventRes = await query(`SELECT * FROM event_state WHERE id = 1;`);
+      const eventRow = eventRes.rows[0];
+      const revealTime = eventRow?.reveal_time || getNextFriday3PMIST().toISOString();
+      const registrationOpen = eventRow ? Boolean(eventRow.registration_open) : true;
+      const groupsLocked = eventRow ? Boolean(eventRow.groups_locked) : false;
+      const isPublished = eventRow ? Boolean(eventRow.is_published) : false;
+
+      const isOverdue = new Date(revealTime).getTime() <= Date.now();
+      const isRevealed = isPublished || (isOverdue && groupsLocked);
+
+      return {
+        totalCount: activeCount,
+        eventStatus: isRevealed ? 'revealed' : groupsLocked ? 'locked' : 'open',
+        revealTime,
+        isRevealed,
+        groupsCount,
+        registrationOpen,
+      };
+    }
+
+    const activeCount = this.inMemoryData.registrations.filter(
+      r => r.status === 'active' || r.status === 'valid'
+    ).length;
+    const isOverdue = new Date(this.inMemoryData.event.revealTime).getTime() <= Date.now();
+    const isRevealed =
+      this.inMemoryData.event.isPublished || (isOverdue && this.inMemoryData.event.groupsLocked);
 
     return {
       totalCount: activeCount,
-      eventStatus: isRevealed ? 'revealed' : (this.data.event.groupsLocked ? 'locked' : 'open'),
-      revealTime: this.data.event.revealTime,
+      eventStatus: isRevealed ? 'revealed' : this.inMemoryData.event.groupsLocked ? 'locked' : 'open',
+      revealTime: this.inMemoryData.event.revealTime,
       isRevealed,
-      groupsCount: this.data.groups.length,
-      registrationOpen: this.data.event.registrationOpen,
+      groupsCount: this.inMemoryData.groups.length,
+      registrationOpen: this.inMemoryData.event.registrationOpen,
     };
   }
 
   // 2. Public Registration Flow
-  public join(name: string, rawRoll: string, rawPhone: string): {
+  public async join(
+    name: string,
+    rawRoll: string,
+    rawPhone: string
+  ): Promise<{
     success: boolean;
     error?: string;
     subtext?: string;
     participant?: { id: string; name: string; rollNumber: string; status: string };
     totalCount: number;
-  } {
-    if (!this.data.event.registrationOpen) {
-      return {
-        success: false,
-        error: "Registrations for this Odhkan are currently closed.",
-        totalCount: this.getActiveCount(),
-      };
-    }
-
+  }> {
     const trimmedName = (name || '').trim();
     if (!trimmedName || trimmedName.length < 2) {
+      const activeCount = await this.getActiveCount();
       return {
         success: false,
-        error: "Please enter your full name.",
-        totalCount: this.getActiveCount(),
+        error: 'Please enter your full name.',
+        totalCount: activeCount,
       };
     }
 
     const rollValidation = this.validateRollNumber(rawRoll);
     if (!rollValidation.valid) {
+      const activeCount = await this.getActiveCount();
       return {
         success: false,
         error: "That roll number doesn't look right. Check it once and try again.",
-        totalCount: this.getActiveCount(),
+        totalCount: activeCount,
       };
     }
 
     const phoneValidation = this.normalizePhoneNumber(rawPhone);
     if (!phoneValidation.valid) {
+      const activeCount = await this.getActiveCount();
       return {
         success: false,
         error: "That phone number doesn't look right. Check it once and try again.",
-        totalCount: this.getActiveCount(),
+        totalCount: activeCount,
       };
     }
 
-    // Check if roll number already exists
-    const existingIndex = this.data.registrations.findIndex(
+    if (isPostgresConfigured()) {
+      // Check event registration open
+      const eventRes = await query(`SELECT registration_open FROM event_state WHERE id = 1;`);
+      const isRegOpen = eventRes.rows[0]?.registration_open !== false;
+      if (!isRegOpen) {
+        const activeCount = await this.getActiveCount();
+        return {
+          success: false,
+          error: 'Registrations for this Odhkan are currently closed.',
+          totalCount: activeCount,
+        };
+      }
+
+      // Check existing registration
+      const existingRes = await query(
+        `SELECT * FROM registrations WHERE roll_number = $1 ORDER BY registered_at ASC;`,
+        [rollValidation.normalizedRoll]
+      );
+
+      if (existingRes.rows.length > 0) {
+        const existing = mapRowToRegistration(existingRes.rows[0]);
+
+        // If previously withdrawn, allow rejoin
+        if (existing.status === 'withdrawn') {
+          const now = Date.now();
+          await query(
+            `UPDATE registrations SET
+               status = 'active',
+               name = $1,
+               phone_number = $2,
+               updated_at = $3,
+               withdrawn_stage = NULL,
+               withdrawn_at = NULL
+             WHERE id = $4;`,
+            [trimmedName, phoneValidation.normalizedPhone, now, existing.id]
+          );
+
+          const activeCount = await this.getActiveCount();
+          return {
+            success: true,
+            participant: {
+              id: existing.id,
+              name: trimmedName,
+              rollNumber: existing.rollNumber,
+              status: 'active',
+            },
+            totalCount: activeCount,
+          };
+        }
+
+        // Already active -> log duplicate audit record
+        const now = Date.now();
+        const dupId = `reg_${now}_dup`;
+        await query(
+          `INSERT INTO registrations (
+             id, name, roll_number, batch, phone_number,
+             created_at, updated_at, registered_at, status,
+             flag_reason, duplicate_of_roll, group_id, group_assigned, revealed
+           ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'duplicate', $9, $10, NULL, false, false);`,
+          [
+            dupId,
+            trimmedName,
+            rollValidation.normalizedRoll,
+            rollValidation.batch,
+            phoneValidation.normalizedPhone,
+            now,
+            now,
+            now,
+            `Duplicate registration of roll number ${rollValidation.normalizedRoll}`,
+            rollValidation.normalizedRoll,
+          ]
+        );
+
+        const activeCount = await this.getActiveCount();
+        return {
+          success: false,
+          error: "You're already in Odhkan.",
+          subtext: "You're all set. See you Friday at 3.",
+          participant: {
+            id: existing.id,
+            name: existing.name,
+            rollNumber: existing.rollNumber,
+            status: existing.status,
+          },
+          totalCount: activeCount,
+        };
+      }
+
+      // Valid new unique registration
+      const now = Date.now();
+      const newId = `reg_${now}_${Math.random().toString(36).substring(2, 6)}`;
+      await query(
+        `INSERT INTO registrations (
+           id, name, roll_number, batch, phone_number,
+           created_at, updated_at, registered_at, status,
+           group_id, group_assigned, revealed
+         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'active', NULL, false, false);`,
+        [
+          newId,
+          trimmedName,
+          rollValidation.normalizedRoll,
+          rollValidation.batch,
+          phoneValidation.normalizedPhone,
+          now,
+          now,
+          now,
+        ]
+      );
+
+      const activeCount = await this.getActiveCount();
+      return {
+        success: true,
+        participant: {
+          id: newId,
+          name: trimmedName,
+          rollNumber: rollValidation.normalizedRoll,
+          status: 'active',
+        },
+        totalCount: activeCount,
+      };
+    }
+
+    // In-memory fallback
+    if (!this.inMemoryData.event.registrationOpen) {
+      return {
+        success: false,
+        error: 'Registrations for this Odhkan are currently closed.',
+        totalCount: await this.getActiveCount(),
+      };
+    }
+
+    const existingIndex = this.inMemoryData.registrations.findIndex(
       r => r.rollNumber === rollValidation.normalizedRoll
     );
 
     if (existingIndex !== -1) {
-      const existing = this.data.registrations[existingIndex];
-
-      // If they were previously withdrawn, allow them to rejoin!
+      const existing = this.inMemoryData.registrations[existingIndex];
       if (existing.status === 'withdrawn') {
         existing.status = 'active';
         existing.name = trimmedName;
@@ -408,7 +551,6 @@ class Database {
         existing.updatedAt = Date.now();
         existing.withdrawnStage = undefined;
         existing.withdrawnAt = null;
-        this.saveData();
 
         return {
           success: true,
@@ -418,11 +560,10 @@ class Database {
             rollNumber: existing.rollNumber,
             status: 'active',
           },
-          totalCount: this.getActiveCount(),
+          totalCount: await this.getActiveCount(),
         };
       }
 
-      // If already active, record duplicate entry for audit without crashing
       const now = Date.now();
       const duplicateEntry: Registration = {
         id: `reg_${now}_dup`,
@@ -440,8 +581,7 @@ class Database {
         groupAssigned: false,
         revealed: false,
       };
-      this.data.registrations.push(duplicateEntry);
-      this.saveData();
+      this.inMemoryData.registrations.push(duplicateEntry);
 
       return {
         success: false,
@@ -453,11 +593,10 @@ class Database {
           rollNumber: existing.rollNumber,
           status: existing.status,
         },
-        totalCount: this.getActiveCount(),
+        totalCount: await this.getActiveCount(),
       };
     }
 
-    // Valid unique registration
     const now = Date.now();
     const newReg: Registration = {
       id: `reg_${now}_${Math.random().toString(36).substring(2, 6)}`,
@@ -474,9 +613,7 @@ class Database {
       revealed: false,
     };
 
-    this.data.registrations.push(newReg);
-    this.saveData();
-
+    this.inMemoryData.registrations.push(newReg);
     return {
       success: true,
       participant: {
@@ -485,50 +622,135 @@ class Database {
         rollNumber: newReg.rollNumber,
         status: newReg.status,
       },
-      totalCount: this.getActiveCount(),
+      totalCount: await this.getActiveCount(),
     };
   }
 
   // 3. "CAN'T MAKE IT TODAY" WITHDRAWAL FLOW
-  // Marks participant as 'withdrawn' and removes them from active matching pool.
-  // Does NOT permanently delete raw registration — keeps full audit trail for organizers!
-  public withdraw(rawRoll: string): {
+  public async withdraw(rawRoll: string): Promise<{
     success: boolean;
     error?: string;
     message?: string;
     status?: string;
     stage?: string;
     totalCount: number;
-  } {
+  }> {
     const validation = this.validateRollNumber(rawRoll);
     if (!validation.valid) {
+      const activeCount = await this.getActiveCount();
       return {
         success: false,
         error: "That roll number doesn't look right. Check it once and try again.",
-        totalCount: this.getActiveCount(),
+        totalCount: activeCount,
       };
     }
 
-    // Find active registration
-    const reg = this.data.registrations.find(
+    if (isPostgresConfigured()) {
+      const regRes = await query(
+        `SELECT * FROM registrations WHERE roll_number = $1 AND status IN ('active', 'valid');`,
+        [validation.normalizedRoll]
+      );
+
+      if (regRes.rows.length === 0) {
+        const alreadyRes = await query(
+          `SELECT * FROM registrations WHERE roll_number = $1 AND status = 'withdrawn';`,
+          [validation.normalizedRoll]
+        );
+        const activeCount = await this.getActiveCount();
+        if (alreadyRes.rows.length > 0) {
+          return {
+            success: false,
+            error: 'You have already removed yourself from this Odhkan.',
+            totalCount: activeCount,
+          };
+        }
+        return {
+          success: false,
+          error: `No active registration found for roll number ${validation.normalizedRoll}.`,
+          totalCount: activeCount,
+        };
+      }
+
+      const reg = mapRowToRegistration(regRes.rows[0]);
+      const eventRes = await query(`SELECT is_published FROM event_state WHERE id = 1;`);
+      const isPublished = Boolean(eventRes.rows[0]?.is_published);
+
+      const groupCountRes = await query(`SELECT COUNT(*)::int as count FROM groups;`);
+      const groupsCount = groupCountRes.rows[0]?.count || 0;
+
+      let stage: 'before_match' | 'after_match' | 'after_reveal' = 'before_match';
+      const now = Date.now();
+
+      if (isPublished) {
+        stage = 'after_reveal';
+        await query(
+          `UPDATE registrations SET
+             status = 'withdrawn',
+             withdrawn_at = $1,
+             updated_at = $1,
+             withdrawn_stage = 'after_reveal'
+           WHERE id = $2;`,
+          [now, reg.id]
+        );
+      } else if (groupsCount > 0) {
+        stage = 'after_match';
+        await query(
+          `UPDATE registrations SET
+             status = 'withdrawn',
+             withdrawn_at = $1,
+             updated_at = $1,
+             withdrawn_stage = 'after_match',
+             group_id = NULL,
+             group_assigned = false
+           WHERE id = $2;`,
+          [now, reg.id]
+        );
+        await query(`DELETE FROM group_members WHERE registration_id = $1;`, [reg.id]);
+      } else {
+        stage = 'before_match';
+        await query(
+          `UPDATE registrations SET
+             status = 'withdrawn',
+             withdrawn_at = $1,
+             updated_at = $1,
+             withdrawn_stage = 'before_match',
+             group_id = NULL,
+             group_assigned = false
+           WHERE id = $2;`,
+          [now, reg.id]
+        );
+      }
+
+      const activeCount = await this.getActiveCount();
+      return {
+        success: true,
+        message: 'You have been removed from this Odhkan.',
+        status: 'withdrawn',
+        stage,
+        totalCount: activeCount,
+      };
+    }
+
+    // In-memory fallback
+    const reg = this.inMemoryData.registrations.find(
       r => r.rollNumber === validation.normalizedRoll && (r.status === 'active' || r.status === 'valid')
     );
 
     if (!reg) {
-      const alreadyWithdrawn = this.data.registrations.find(
+      const alreadyWithdrawn = this.inMemoryData.registrations.find(
         r => r.rollNumber === validation.normalizedRoll && r.status === 'withdrawn'
       );
       if (alreadyWithdrawn) {
         return {
           success: false,
-          error: "You have already removed yourself from this Odhkan.",
-          totalCount: this.getActiveCount(),
+          error: 'You have already removed yourself from this Odhkan.',
+          totalCount: await this.getActiveCount(),
         };
       }
       return {
         success: false,
         error: `No active registration found for roll number ${validation.normalizedRoll}.`,
-        totalCount: this.getActiveCount(),
+        totalCount: await this.getActiveCount(),
       };
     }
 
@@ -538,50 +760,39 @@ class Database {
     reg.updatedAt = now;
 
     let stage: 'before_match' | 'after_match' | 'after_reveal' = 'before_match';
-
-    if (this.data.event.isPublished) {
-      // Stage 9: Withdrawal after final list published
-      // "Do not automatically regenerate the entire event. Their group should remain unchanged.
-      // Instead, mark them as: withdrawn after reveal. The other members still see group."
+    if (this.inMemoryData.event.isPublished) {
       stage = 'after_reveal';
       reg.withdrawnStage = 'after_reveal';
-    } else if (this.data.groups.length > 0) {
-      // Stage 8: Withdrawal after groups generated but before final list is published
-      // "The admin dashboard should clearly show: 1 participant withdrew after matching.
-      // Prompt: Groups need to be remixed. Then allow: Mix Again."
+    } else if (this.inMemoryData.groups.length > 0) {
       stage = 'after_match';
       reg.withdrawnStage = 'after_match';
       reg.groupAssigned = false;
       const oldGroupId = reg.groupId;
       reg.groupId = null;
-
       if (oldGroupId) {
-        const grp = this.data.groups.find(g => g.id === oldGroupId);
+        const grp = this.inMemoryData.groups.find(g => g.id === oldGroupId);
         if (grp) {
           grp.memberIds = grp.memberIds.filter(id => id !== reg.id);
         }
       }
     } else {
-      // Stage 7: Withdrawal before grouping
       stage = 'before_match';
       reg.withdrawnStage = 'before_match';
       reg.groupId = null;
       reg.groupAssigned = false;
     }
 
-    this.saveData();
-
     return {
       success: true,
-      message: "You have been removed from this Odhkan.",
+      message: 'You have been removed from this Odhkan.',
       status: 'withdrawn',
       stage,
-      totalCount: this.getActiveCount(),
+      totalCount: await this.getActiveCount(),
     };
   }
 
-  // 4. Check registration status for a participant
-  public getParticipantStatus(rawRoll: string): {
+  // 4. Check participant status
+  public async getParticipantStatus(rawRoll: string): Promise<{
     registered: boolean;
     participant?: {
       name: string;
@@ -591,20 +802,48 @@ class Database {
       groupAssigned: boolean;
     };
     isRevealed: boolean;
-  } {
+  }> {
     const validation = this.validateRollNumber(rawRoll);
     if (!validation.valid) {
-      return { registered: false, isRevealed: this.data.event.isPublished };
+      return { registered: false, isRevealed: false };
     }
 
-    const reg = this.data.registrations.find(
-      r => r.rollNumber === validation.normalizedRoll && (r.status === 'active' || r.status === 'valid')
-    ) || this.data.registrations.find(
-      r => r.rollNumber === validation.normalizedRoll
-    );
+    if (isPostgresConfigured()) {
+      const eventRes = await query(`SELECT is_published FROM event_state WHERE id = 1;`);
+      const isRevealed = Boolean(eventRes.rows[0]?.is_published);
+
+      const regRes = await query(
+        `SELECT * FROM registrations WHERE roll_number = $1
+         ORDER BY (CASE WHEN status IN ('active', 'valid') THEN 0 ELSE 1 END), registered_at ASC
+         LIMIT 1;`,
+        [validation.normalizedRoll]
+      );
+
+      if (regRes.rows.length === 0) {
+        return { registered: false, isRevealed };
+      }
+
+      const reg = mapRowToRegistration(regRes.rows[0]);
+      return {
+        registered: true,
+        participant: {
+          name: reg.name,
+          rollNumber: reg.rollNumber,
+          batch: reg.batch,
+          status: (reg.status === 'valid' ? 'active' : reg.status) as any,
+          groupAssigned: Boolean(reg.groupId),
+        },
+        isRevealed,
+      };
+    }
+
+    const reg =
+      this.inMemoryData.registrations.find(
+        r => r.rollNumber === validation.normalizedRoll && (r.status === 'active' || r.status === 'valid')
+      ) || this.inMemoryData.registrations.find(r => r.rollNumber === validation.normalizedRoll);
 
     if (!reg) {
-      return { registered: false, isRevealed: this.data.event.isPublished };
+      return { registered: false, isRevealed: this.inMemoryData.event.isPublished };
     }
 
     return {
@@ -616,19 +855,18 @@ class Database {
         status: (reg.status === 'valid' ? 'active' : reg.status) as any,
         groupAssigned: Boolean(reg.groupId),
       },
-      isRevealed: this.data.event.isPublished,
+      isRevealed: this.inMemoryData.event.isPublished,
     };
   }
 
   // 5. Public Group Reveal Lookup (ONLY AFTER PUBLISH)
-  // Strict Privacy: Never exposes phone numbers in default response!
-  public revealGroupForRoll(rawRoll: string): {
+  public async revealGroupForRoll(rawRoll: string): Promise<{
     success: boolean;
     error?: string;
     subtext?: string;
     participant?: { name: string; batch: string; rollNumber: string; status: string };
     group?: { id: string; members: GroupMemberSummary[]; hasWithdrawnMember: boolean };
-  } {
+  }> {
     const validation = this.validateRollNumber(rawRoll);
     if (!validation.valid) {
       return {
@@ -637,18 +875,99 @@ class Database {
       };
     }
 
-    if (!this.data.event.isPublished) {
+    if (isPostgresConfigured()) {
+      const eventRes = await query(`SELECT is_published FROM event_state WHERE id = 1;`);
+      const isPublished = Boolean(eventRes.rows[0]?.is_published);
+
+      if (!isPublished) {
+        return {
+          success: false,
+          error: 'Groups will be revealed Friday at 3:00 PM.',
+          subtext: 'Three people from across the college. Start with a hello.',
+        };
+      }
+
+      const regRes = await query(
+        `SELECT * FROM registrations WHERE roll_number = $1 ORDER BY registered_at ASC LIMIT 1;`,
+        [validation.normalizedRoll]
+      );
+
+      if (regRes.rows.length === 0) {
+        return {
+          success: false,
+          error: "We couldn't find your registration. Double check your roll number.",
+        };
+      }
+
+      const reg = mapRowToRegistration(regRes.rows[0]);
+      if (reg.status === 'withdrawn' && reg.withdrawnStage !== 'after_reveal') {
+        return {
+          success: false,
+          error: 'You previously removed yourself from this Odhkan.',
+        };
+      }
+
+      if (!reg.groupId) {
+        return {
+          success: false,
+          error: 'Your group is being finalized. Please check back shortly.',
+        };
+      }
+
+      const groupRes = await query(`SELECT * FROM groups WHERE id = $1;`, [reg.groupId]);
+      if (groupRes.rows.length === 0) {
+        return {
+          success: false,
+          error: 'Group information is temporarily unavailable. Please retry in a moment.',
+        };
+      }
+
+      const membersRes = await query(
+        `SELECT r.name, r.batch, r.status
+         FROM group_members gm
+         JOIN registrations r ON gm.registration_id = r.id
+         WHERE gm.group_id = $1
+         ORDER BY r.name ASC;`,
+        [reg.groupId]
+      );
+
+      let hasWithdrawnMember = false;
+      const memberSummaries: GroupMemberSummary[] = membersRes.rows.map(m => {
+        const isWithdrawn = m.status === 'withdrawn';
+        if (isWithdrawn) hasWithdrawnMember = true;
+        return {
+          name: m.name,
+          batch: m.batch,
+          isWithdrawn,
+        };
+      });
+
       return {
-        success: false,
-        error: "Groups will be revealed Friday at 3:00 PM.",
-        subtext: "Three people from across the college. Start with a hello.",
+        success: true,
+        participant: {
+          name: reg.name,
+          batch: reg.batch,
+          rollNumber: reg.rollNumber,
+          status: reg.status,
+        },
+        group: {
+          id: reg.groupId,
+          members: memberSummaries,
+          hasWithdrawnMember,
+        },
       };
     }
 
-    const reg = this.data.registrations.find(
-      r => r.rollNumber === validation.normalizedRoll
-    );
+    // In-memory fallback
+    if (!this.inMemoryData.event.isPublished) {
+      return {
+        success: false,
+        error: 'Groups will be revealed Friday at 3:00 PM.',
+        subtext: 'Three people from across the college. Start with a hello.',
+      };
+    }
 
+    const reg = this.inMemoryData.registrations.find(r => r.rollNumber === validation.normalizedRoll);
     if (!reg) {
       return {
         success: false,
@@ -659,30 +978,28 @@ class Database {
     if (reg.status === 'withdrawn' && reg.withdrawnStage !== 'after_reveal') {
       return {
         success: false,
-        error: "You previously removed yourself from this Odhkan.",
+        error: 'You previously removed yourself from this Odhkan.',
       };
     }
 
     if (!reg.groupId) {
       return {
         success: false,
-        error: "Your group is being finalized. Please check back shortly.",
+        error: 'Your group is being finalized. Please check back shortly.',
       };
     }
 
-    const group = this.data.groups.find(g => g.id === reg.groupId);
+    const group = this.inMemoryData.groups.find(g => g.id === reg.groupId);
     if (!group) {
       return {
         success: false,
-        error: "Group information is temporarily unavailable. Please retry in a moment.",
+        error: 'Group information is temporarily unavailable. Please retry in a moment.',
       };
     }
 
     let hasWithdrawnMember = false;
-
-    // Return members - Name and Batch only! NEVER PHONE NUMBERS OR ROLL NUMBERS HERE.
     const memberSummaries: GroupMemberSummary[] = group.memberIds.map(memId => {
-      const m = this.data.registrations.find(r => r.id === memId);
+      const m = this.inMemoryData.registrations.find(r => r.id === memId);
       const isWithdrawn = m?.status === 'withdrawn';
       if (isWithdrawn) hasWithdrawnMember = true;
       return {
@@ -708,42 +1025,74 @@ class Database {
     };
   }
 
-  // 6. CONTROLLED GROUP CONTACT DETAILS (Section 18)
-  // "Phone numbers should NOT automatically be visible to everyone.
-  // Instead, give each participant a controlled option: Can't find them? -> Contact your group.
-  // Only after the participant intentionally chooses this should the contact information be revealed."
-  public getGroupContactsForRoll(rawRoll: string): {
+  // 6. Controlled Group Contact Details
+  public async getGroupContactsForRoll(rawRoll: string): Promise<{
     success: boolean;
     error?: string;
     subtext?: string;
     groupId?: string;
     contacts?: GroupContactSummary[];
-  } {
+  }> {
     const validation = this.validateRollNumber(rawRoll);
     if (!validation.valid) {
-      return { success: false, error: "Invalid roll number." };
+      return { success: false, error: 'Invalid roll number.' };
     }
 
-    if (!this.data.event.isPublished) {
-      return { success: false, error: "Groups have not been published yet." };
+    if (isPostgresConfigured()) {
+      const eventRes = await query(`SELECT is_published FROM event_state WHERE id = 1;`);
+      if (!eventRes.rows[0]?.is_published) {
+        return { success: false, error: 'Groups have not been published yet.' };
+      }
+
+      const regRes = await query(
+        `SELECT group_id FROM registrations WHERE roll_number = $1 LIMIT 1;`,
+        [validation.normalizedRoll]
+      );
+      const groupId = regRes.rows[0]?.group_id;
+      if (!groupId) {
+        return { success: false, error: 'Could not find your group.' };
+      }
+
+      const membersRes = await query(
+        `SELECT r.name, r.batch, r.phone_number, r.status
+         FROM group_members gm
+         JOIN registrations r ON gm.registration_id = r.id
+         WHERE gm.group_id = $1
+         ORDER BY r.name ASC;`,
+        [groupId]
+      );
+
+      const contacts: GroupContactSummary[] = membersRes.rows.map(m => ({
+        name: m.name,
+        batch: m.batch,
+        phoneNumber: m.phone_number,
+        isWithdrawn: m.status === 'withdrawn',
+      }));
+
+      return {
+        success: true,
+        groupId,
+        contacts,
+      };
     }
 
-    const reg = this.data.registrations.find(
-      r => r.rollNumber === validation.normalizedRoll
-    );
+    // In-memory fallback
+    if (!this.inMemoryData.event.isPublished) {
+      return { success: false, error: 'Groups have not been published yet.' };
+    }
 
+    const reg = this.inMemoryData.registrations.find(r => r.rollNumber === validation.normalizedRoll);
     if (!reg || !reg.groupId) {
-      return { success: false, error: "Could not find your group." };
+      return { success: false, error: 'Could not find your group.' };
     }
 
-    const group = this.data.groups.find(g => g.id === reg.groupId);
+    const group = this.inMemoryData.groups.find(g => g.id === reg.groupId);
     if (!group) {
-      return { success: false, error: "Group not found." };
+      return { success: false, error: 'Group not found.' };
     }
 
-    // Format contacts for group members
     const contacts: GroupContactSummary[] = group.memberIds.map(memId => {
-      const m = this.data.registrations.find(r => r.id === memId);
+      const m = this.inMemoryData.registrations.find(r => r.id === memId);
       return {
         name: m ? m.name : 'Fellow Student',
         batch: m ? m.batch : 'College',
@@ -759,21 +1108,27 @@ class Database {
     };
   }
 
-  // 7. DUPLICATE CHECK & REVIEW
-  public runDuplicateCheck(): {
+  // 7. Duplicate Check & Review
+  public async runDuplicateCheck(): Promise<{
     totalRegistrations: number;
     uniqueParticipants: number;
     duplicateCount: number;
     issues: DuplicateIssue[];
     readyToMix: boolean;
-  } {
-    const rollMap: Record<string, Registration[]> = {};
+  }> {
+    let allRegistrations: Registration[] = [];
 
-    for (const reg of this.data.registrations) {
+    if (isPostgresConfigured()) {
+      const res = await query(`SELECT * FROM registrations ORDER BY registered_at ASC;`);
+      allRegistrations = res.rows.map(mapRowToRegistration);
+    } else {
+      allRegistrations = [...this.inMemoryData.registrations];
+    }
+
+    const rollMap: Record<string, Registration[]> = {};
+    for (const reg of allRegistrations) {
       const roll = reg.rollNumber;
-      if (!rollMap[roll]) {
-        rollMap[roll] = [];
-      }
+      if (!rollMap[roll]) rollMap[roll] = [];
       rollMap[roll].push(reg);
     }
 
@@ -783,7 +1138,7 @@ class Database {
     for (const roll in rollMap) {
       const entries = rollMap[roll];
       if (entries.length > 1) {
-        duplicateRecords += (entries.length - 1);
+        duplicateRecords += entries.length - 1;
         entries.sort((a, b) => a.registeredAt - b.registeredAt);
 
         const activeCount = entries.filter(e => e.status === 'active' || e.status === 'valid').length;
@@ -806,10 +1161,12 @@ class Database {
     }
 
     const unresolvedCount = issues.filter(i => !i.resolved).length;
-    const activeParticipants = this.getActiveCount();
+    const activeParticipants = allRegistrations.filter(
+      r => r.status === 'active' || r.status === 'valid'
+    ).length;
 
     return {
-      totalRegistrations: this.data.registrations.length,
+      totalRegistrations: allRegistrations.length,
       uniqueParticipants: activeParticipants,
       duplicateCount: duplicateRecords,
       issues,
@@ -817,14 +1174,66 @@ class Database {
     };
   }
 
-  // 8. RESOLVE DUPLICATE
-  public resolveDuplicate(rollNumber: string, choice: 'first' | 'latest' | string): {
+  // 8. Resolve Duplicate
+  public async resolveDuplicate(
+    rollNumber: string,
+    choice: 'first' | 'latest' | string
+  ): Promise<{
     success: boolean;
     rollNumber: string;
     chosenId: string;
-  } {
+  }> {
     const normalizedRoll = this.normalizeRollNumber(rollNumber);
-    const matches = this.data.registrations
+
+    if (isPostgresConfigured()) {
+      const res = await query(
+        `SELECT * FROM registrations WHERE roll_number = $1 ORDER BY registered_at ASC;`,
+        [normalizedRoll]
+      );
+      const matches = res.rows.map(mapRowToRegistration);
+
+      if (matches.length <= 1) {
+        return { success: true, rollNumber: normalizedRoll, chosenId: matches[0]?.id || '' };
+      }
+
+      let chosen: Registration;
+      if (choice === 'first') {
+        chosen = matches[0];
+      } else if (choice === 'latest') {
+        chosen = matches[matches.length - 1];
+      } else {
+        chosen = matches.find(m => m.id === choice) || matches[matches.length - 1];
+      }
+
+      const client = await getClient();
+      try {
+        await client.query('BEGIN');
+        const now = Date.now();
+        for (const entry of matches) {
+          if (entry.id === chosen.id) {
+            await client.query(
+              `UPDATE registrations SET status = 'active', flag_reason = $1, updated_at = $2 WHERE id = $3;`,
+              [`Resolved as canonical record for ${normalizedRoll}`, now, entry.id]
+            );
+          } else {
+            await client.query(
+              `UPDATE registrations SET status = 'duplicate', flag_reason = $1, updated_at = $2 WHERE id = $3;`,
+              [`Superseded by entry ${chosen.id} for roll ${normalizedRoll}`, now, entry.id]
+            );
+          }
+        }
+        await client.query('COMMIT');
+        return { success: true, rollNumber: normalizedRoll, chosenId: chosen.id };
+      } catch (err) {
+        await client.query('ROLLBACK');
+        throw err;
+      } finally {
+        client.release();
+      }
+    }
+
+    // In-memory fallback
+    const matches = this.inMemoryData.registrations
       .filter(r => r.rollNumber === normalizedRoll)
       .sort((a, b) => a.registeredAt - b.registeredAt);
 
@@ -852,21 +1261,17 @@ class Database {
       entry.updatedAt = Date.now();
     }
 
-    this.saveData();
     return { success: true, rollNumber: normalizedRoll, chosenId: chosen.id };
   }
 
-  // 9. MIX MATCH (GROUP GENERATION)
-  // Requirement: ONLY ACTIVE participants are included.
-  // Withdrawn, duplicates, and invalid participants are strictly excluded.
-  public mixMatch(): {
+  // 9. Mix Match (Group Generation)
+  public async mixMatch(): Promise<{
     success: boolean;
     error?: string;
     totalParticipants: number;
     groupsCount: number;
-  } {
-    // 1. Check for unresolved duplicates
-    const dupCheck = this.runDuplicateCheck();
+  }> {
+    const dupCheck = await this.runDuplicateCheck();
     const unresolved = dupCheck.issues.filter(i => !i.resolved);
     if (unresolved.length > 0) {
       return {
@@ -877,10 +1282,15 @@ class Database {
       };
     }
 
-    // 2. Filter ONLY active participants
-    const activeParticipants = this.data.registrations.filter(
-      r => r.status === 'active' || r.status === 'valid'
-    );
+    let activeParticipants: Registration[] = [];
+    if (isPostgresConfigured()) {
+      const res = await query(`SELECT * FROM registrations WHERE status IN ('active', 'valid');`);
+      activeParticipants = res.rows.map(mapRowToRegistration);
+    } else {
+      activeParticipants = this.inMemoryData.registrations.filter(
+        r => r.status === 'active' || r.status === 'valid'
+      );
+    }
 
     const N = activeParticipants.length;
     if (N < 3) {
@@ -911,13 +1321,13 @@ class Database {
       groupSizes.push(2);
     }
 
-    // Random shuffle
+    // Shuffle
     for (let i = participants.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));
       [participants[i], participants[j]] = [participants[j], participants[i]];
     }
 
-    // Initial partition
+    // Partition
     let curIdx = 0;
     const initialGroups: Registration[][] = [];
     for (const size of groupSizes) {
@@ -959,7 +1369,6 @@ class Database {
 
         const oldPen = calcGroupPenalty(g1) + calcGroupPenalty(g2);
 
-        // Test swap
         const t1 = g1[m1Idx];
         const t2 = g2[m2Idx];
         g1[m1Idx] = t2;
@@ -969,7 +1378,7 @@ class Database {
         const delta = newPen - oldPen;
 
         if (delta < 0 || (delta === 0 && Math.random() < 0.15)) {
-          // keep
+          // keep swap
         } else {
           g1[m1Idx] = t1;
           g2[m2Idx] = t2;
@@ -980,17 +1389,18 @@ class Database {
     // Format new groups
     const newGroups: Group[] = [];
     const assignedIdsMap: Record<string, string> = {};
+    const now = Date.now();
 
     initialGroups.forEach((grp, idx) => {
       const padNum = (idx + 1).toString().padStart(2, '0');
-      const groupId = `grp_${Date.now()}_${padNum}`;
+      const groupId = `grp_${now}_${padNum}`;
       const memberIds = grp.map(p => p.id);
 
       newGroups.push({
         id: groupId,
         name: `Group ${padNum}`,
         memberIds,
-        createdAt: Date.now(),
+        createdAt: now,
         locked: false,
       });
 
@@ -999,8 +1409,66 @@ class Database {
       });
     });
 
-    // Update registrations
-    for (const r of this.data.registrations) {
+    if (isPostgresConfigured()) {
+      const client = await getClient();
+      try {
+        await client.query('BEGIN');
+
+        // Delete old group associations
+        await client.query('DELETE FROM group_members;');
+        await client.query('DELETE FROM groups;');
+
+        // Insert new groups & members
+        for (const g of newGroups) {
+          await client.query(
+            `INSERT INTO groups (id, name, created_at, locked) VALUES ($1, $2, $3, $4);`,
+            [g.id, g.name, g.createdAt, g.locked]
+          );
+
+          for (const mId of g.memberIds) {
+            await client.query(
+              `INSERT INTO group_members (group_id, registration_id) VALUES ($1, $2);`,
+              [g.id, mId]
+            );
+            await client.query(
+              `UPDATE registrations SET group_id = $1, group_assigned = true, updated_at = $2 WHERE id = $3;`,
+              [g.id, now, mId]
+            );
+          }
+        }
+
+        // Clear group assignment on non-active
+        await client.query(
+          `UPDATE registrations SET group_id = NULL, group_assigned = false WHERE status NOT IN ('active', 'valid');`
+        );
+
+        // Update event state
+        await client.query(
+          `UPDATE event_state SET
+             stage = 'MIXED',
+             groups_locked = false,
+             is_published = false,
+             last_mixed_at = $1
+           WHERE id = 1;`,
+          [now]
+        );
+
+        await client.query('COMMIT');
+        return {
+          success: true,
+          totalParticipants: participants.length,
+          groupsCount: newGroups.length,
+        };
+      } catch (err) {
+        await client.query('ROLLBACK');
+        throw err;
+      } finally {
+        client.release();
+      }
+    }
+
+    // In-memory fallback
+    for (const r of this.inMemoryData.registrations) {
       if (r.status === 'active' || r.status === 'valid') {
         r.groupId = assignedIdsMap[r.id] || null;
         r.groupAssigned = Boolean(r.groupId);
@@ -1008,15 +1476,14 @@ class Database {
         r.groupId = null;
         r.groupAssigned = false;
       }
-      r.updatedAt = Date.now();
+      r.updatedAt = now;
     }
 
-    this.data.groups = newGroups;
-    this.data.lastMixedAt = Date.now();
-    this.data.event.stage = 'MIXED';
-    this.data.event.groupsLocked = false;
-    this.data.event.isPublished = false;
-    this.saveData();
+    this.inMemoryData.groups = newGroups;
+    this.inMemoryData.lastMixedAt = now;
+    this.inMemoryData.event.stage = 'MIXED';
+    this.inMemoryData.event.groupsLocked = false;
+    this.inMemoryData.event.isPublished = false;
 
     return {
       success: true,
@@ -1025,23 +1492,75 @@ class Database {
     };
   }
 
-  // 10. LOCK GROUPS
-  public lockGroups(): { success: boolean; groupsCount: number } {
-    this.data.event.groupsLocked = true;
-    this.data.event.stage = 'GROUPS_LOCKED';
-    for (const g of this.data.groups) {
+  // 10. Lock Groups
+  public async lockGroups(): Promise<{ success: boolean; groupsCount: number }> {
+    if (isPostgresConfigured()) {
+      await query(`UPDATE event_state SET stage = 'GROUPS_LOCKED', groups_locked = true WHERE id = 1;`);
+      await query(`UPDATE groups SET locked = true;`);
+      const countRes = await query(`SELECT COUNT(*)::int as count FROM groups;`);
+      return { success: true, groupsCount: countRes.rows[0]?.count || 0 };
+    }
+
+    this.inMemoryData.event.groupsLocked = true;
+    this.inMemoryData.event.stage = 'GROUPS_LOCKED';
+    for (const g of this.inMemoryData.groups) {
       g.locked = true;
     }
-    this.saveData();
-    return { success: true, groupsCount: this.data.groups.length };
+    return { success: true, groupsCount: this.inMemoryData.groups.length };
   }
 
-  // 11. FINAL INTEGRITY CHECK
-  public runFinalIntegrityCheck(): IntegrityCheckResult {
+  // 11. Final Integrity Check
+  public async runFinalIntegrityCheck(): Promise<IntegrityCheckResult> {
     const issues: string[] = [];
-    const activeRegistrations = this.data.registrations.filter(r => r.status === 'active' || r.status === 'valid');
-    const withdrawnRegistrations = this.data.registrations.filter(r => r.status === 'withdrawn');
-    const duplicateRegistrations = this.data.registrations.filter(r => r.status === 'duplicate');
+
+    let allRegistrations: Registration[] = [];
+    let allGroups: Group[] = [];
+    let eventState: EventState;
+    let lastMixedAt: number | null = null;
+
+    if (isPostgresConfigured()) {
+      const regRes = await query(`SELECT * FROM registrations ORDER BY registered_at ASC;`);
+      allRegistrations = regRes.rows.map(mapRowToRegistration);
+
+      const groupRes = await query(`
+        SELECT g.id, g.name, g.created_at, g.locked,
+          COALESCE(
+            json_agg(gm.registration_id) FILTER (WHERE gm.registration_id IS NOT NULL),
+            '[]'
+          ) as member_ids
+        FROM groups g
+        LEFT JOIN group_members gm ON g.id = gm.group_id
+        GROUP BY g.id, g.name, g.created_at, g.locked
+        ORDER BY g.name ASC;
+      `);
+      allGroups = groupRes.rows.map(row => ({
+        id: row.id,
+        name: row.name,
+        createdAt: Number(row.created_at),
+        locked: Boolean(row.locked),
+        memberIds: row.member_ids || [],
+      }));
+
+      const eventRes = await query(`SELECT * FROM event_state WHERE id = 1;`);
+      const eventRow = eventRes.rows[0];
+      eventState = {
+        stage: eventRow?.stage || 'REGISTRATION_OPEN',
+        revealTime: eventRow?.reveal_time || getNextFriday3PMIST().toISOString(),
+        registrationOpen: Boolean(eventRow?.registration_open),
+        groupsLocked: Boolean(eventRow?.groups_locked),
+        isPublished: Boolean(eventRow?.is_published),
+        publishedAt: eventRow?.published_at ? Number(eventRow.published_at) : null,
+      };
+      lastMixedAt = eventRow?.last_mixed_at ? Number(eventRow.last_mixed_at) : null;
+    } else {
+      allRegistrations = this.inMemoryData.registrations;
+      allGroups = this.inMemoryData.groups;
+      eventState = this.inMemoryData.event;
+      lastMixedAt = this.inMemoryData.lastMixedAt;
+    }
+
+    const activeRegistrations = allRegistrations.filter(r => r.status === 'active' || r.status === 'valid');
+    const withdrawnRegistrations = allRegistrations.filter(r => r.status === 'withdrawn');
 
     // 1. Duplicate roll numbers among active participants
     const rollCounts: Record<string, number> = {};
@@ -1055,7 +1574,7 @@ class Database {
     }
 
     // 2. Unresolved duplicate entries
-    const unresolvedDuplicates = this.data.registrations.filter(
+    const unresolvedDuplicates = allRegistrations.filter(
       r => r.status === 'duplicate' && !r.flagReason?.includes('Superseded')
     );
 
@@ -1067,7 +1586,7 @@ class Database {
 
     // 4. Any participant in multiple groups
     const memberGroupCounts: Record<string, number> = {};
-    for (const g of this.data.groups) {
+    for (const g of allGroups) {
       for (const mId of g.memberIds) {
         memberGroupCounts[mId] = (memberGroupCounts[mId] || 0) + 1;
       }
@@ -1081,36 +1600,42 @@ class Database {
     }
 
     // 5. Check if any group has fewer than 2 active members
-    for (const g of this.data.groups) {
+    for (const g of allGroups) {
       if (g.memberIds.length < 2) {
         issues.push(`${g.name} has fewer than 2 members.`);
       }
     }
 
     // 6. Check if groups need remix because someone withdrew after matching
-    const withdrawnAfterMatch = this.data.registrations.filter(
-      r => r.status === 'withdrawn' && r.withdrawnStage === 'after_match' && (this.data.lastMixedAt ? (r.withdrawnAt || 0) > this.data.lastMixedAt : false)
+    const withdrawnAfterMatch = allRegistrations.filter(
+      r =>
+        r.status === 'withdrawn' &&
+        r.withdrawnStage === 'after_match' &&
+        (lastMixedAt ? (r.withdrawnAt || 0) > lastMixedAt : false)
     );
     if (withdrawnAfterMatch.length > 0) {
       issues.push(`${withdrawnAfterMatch.length} participant(s) withdrew after matching. Groups must be remixed.`);
     }
 
     // 7. Whether all groups are locked
-    if (!this.data.event.groupsLocked) {
+    if (!eventState.groupsLocked) {
       issues.push("Groups are not locked yet. Click 'Lock Groups' before publishing.");
     }
 
     const passed = issues.length === 0;
-    if (passed && this.data.event.stage === 'GROUPS_LOCKED') {
-      this.data.event.stage = 'READY_TO_PUBLISH';
-      this.saveData();
+    if (passed && eventState.stage === 'GROUPS_LOCKED') {
+      if (isPostgresConfigured()) {
+        await query(`UPDATE event_state SET stage = 'READY_TO_PUBLISH' WHERE id = 1;`);
+      } else {
+        this.inMemoryData.event.stage = 'READY_TO_PUBLISH';
+      }
     }
 
     return {
       passed,
       issues,
       stats: {
-        totalRegistrations: this.data.registrations.length,
+        totalRegistrations: allRegistrations.length,
         activeParticipants: activeRegistrations.length,
         withdrawnCount: withdrawnRegistrations.length,
         uniqueParticipants: activeRegistrations.length,
@@ -1118,14 +1643,14 @@ class Database {
         unresolvedDuplicates: unresolvedDuplicates.length,
         unassignedCount: unassigned.length,
         participantsInMultipleGroups: multiGroupCount,
-        groupsCount: this.data.groups.length,
+        groupsCount: allGroups.length,
       },
     };
   }
 
-  // 12. PUBLISH FINAL LIST
-  public publishFinalList(): { success: boolean; error?: string; publishedAt: number | null } {
-    const check = this.runFinalIntegrityCheck();
+  // 12. Publish Final List
+  public async publishFinalList(): Promise<{ success: boolean; error?: string; publishedAt: number | null }> {
+    const check = await this.runFinalIntegrityCheck();
     if (!check.passed) {
       return {
         success: false,
@@ -1134,60 +1659,134 @@ class Database {
       };
     }
 
-    this.data.event.isPublished = true;
-    this.data.event.publishedAt = Date.now();
-    this.data.event.stage = 'PUBLISHED';
-    this.saveData();
+    const now = Date.now();
+    if (isPostgresConfigured()) {
+      await query(
+        `UPDATE event_state SET
+           is_published = true,
+           published_at = $1,
+           stage = 'PUBLISHED'
+         WHERE id = 1;`,
+        [now]
+      );
+      return { success: true, publishedAt: now };
+    }
+
+    this.inMemoryData.event.isPublished = true;
+    this.inMemoryData.event.publishedAt = now;
+    this.inMemoryData.event.stage = 'PUBLISHED';
 
     return {
       success: true,
-      publishedAt: this.data.event.publishedAt,
+      publishedAt: now,
     };
   }
 
   // Admin registration toggle
-  public toggleRegistration(isOpen: boolean): boolean {
-    this.data.event.registrationOpen = isOpen;
-    if (!isOpen && this.data.event.stage === 'REGISTRATION_OPEN') {
-      this.data.event.stage = 'REGISTRATION_CLOSED';
-    } else if (isOpen && this.data.event.stage === 'REGISTRATION_CLOSED') {
-      this.data.event.stage = 'REGISTRATION_OPEN';
+  public async toggleRegistration(isOpen: boolean): Promise<boolean> {
+    if (isPostgresConfigured()) {
+      const eventRes = await query(`SELECT stage FROM event_state WHERE id = 1;`);
+      let nextStage = eventRes.rows[0]?.stage || 'REGISTRATION_OPEN';
+
+      if (!isOpen && nextStage === 'REGISTRATION_OPEN') {
+        nextStage = 'REGISTRATION_CLOSED';
+      } else if (isOpen && nextStage === 'REGISTRATION_CLOSED') {
+        nextStage = 'REGISTRATION_OPEN';
+      }
+
+      await query(`UPDATE event_state SET registration_open = $1, stage = $2 WHERE id = 1;`, [
+        isOpen,
+        nextStage,
+      ]);
+      return isOpen;
     }
-    this.saveData();
-    return this.data.event.registrationOpen;
+
+    this.inMemoryData.event.registrationOpen = isOpen;
+    if (!isOpen && this.inMemoryData.event.stage === 'REGISTRATION_OPEN') {
+      this.inMemoryData.event.stage = 'REGISTRATION_CLOSED';
+    } else if (isOpen && this.inMemoryData.event.stage === 'REGISTRATION_CLOSED') {
+      this.inMemoryData.event.stage = 'REGISTRATION_OPEN';
+    }
+    return this.inMemoryData.event.registrationOpen;
   }
 
   // Admin full data
-  public getAdminData() {
-    const totalRegistrations = this.data.registrations.length;
-    const activeParticipants = this.getActiveCount();
-    const withdrawnCount = this.data.registrations.filter(r => r.status === 'withdrawn').length;
-    const duplicateCount = this.data.registrations.filter(r => r.status === 'duplicate').length;
-    const invalidCount = this.data.registrations.filter(r => r.status === 'invalid').length;
-    const totalGroups = this.data.groups.length;
+  public async getAdminData() {
+    let allRegistrations: Registration[] = [];
+    let allGroups: Group[] = [];
+    let eventState: EventState;
+    let lastMixedAt: number | null = null;
 
-    // Check if anyone withdrew after matching
-    const withdrawnAfterMatchingCount = this.data.registrations.filter(
-      r => r.status === 'withdrawn' && r.withdrawnStage === 'after_match' && (this.data.lastMixedAt ? (r.withdrawnAt || 0) > this.data.lastMixedAt : true)
+    if (isPostgresConfigured()) {
+      const regRes = await query(`SELECT * FROM registrations ORDER BY registered_at ASC;`);
+      allRegistrations = regRes.rows.map(mapRowToRegistration);
+
+      const groupRes = await query(`
+        SELECT g.id, g.name, g.created_at, g.locked,
+          COALESCE(
+            json_agg(gm.registration_id) FILTER (WHERE gm.registration_id IS NOT NULL),
+            '[]'
+          ) as member_ids
+        FROM groups g
+        LEFT JOIN group_members gm ON g.id = gm.group_id
+        GROUP BY g.id, g.name, g.created_at, g.locked
+        ORDER BY g.name ASC;
+      `);
+      allGroups = groupRes.rows.map(row => ({
+        id: row.id,
+        name: row.name,
+        createdAt: Number(row.created_at),
+        locked: Boolean(row.locked),
+        memberIds: row.member_ids || [],
+      }));
+
+      const eventRes = await query(`SELECT * FROM event_state WHERE id = 1;`);
+      const eventRow = eventRes.rows[0];
+      eventState = {
+        stage: eventRow?.stage || 'REGISTRATION_OPEN',
+        revealTime: eventRow?.reveal_time || getNextFriday3PMIST().toISOString(),
+        registrationOpen: Boolean(eventRow?.registration_open),
+        groupsLocked: Boolean(eventRow?.groups_locked),
+        isPublished: Boolean(eventRow?.is_published),
+        publishedAt: eventRow?.published_at ? Number(eventRow.published_at) : null,
+      };
+      lastMixedAt = eventRow?.last_mixed_at ? Number(eventRow.last_mixed_at) : null;
+    } else {
+      allRegistrations = this.inMemoryData.registrations;
+      allGroups = this.inMemoryData.groups;
+      eventState = this.inMemoryData.event;
+      lastMixedAt = this.inMemoryData.lastMixedAt;
+    }
+
+    const totalRegistrations = allRegistrations.length;
+    const activeParticipants = allRegistrations.filter(r => r.status === 'active' || r.status === 'valid').length;
+    const withdrawnCount = allRegistrations.filter(r => r.status === 'withdrawn').length;
+    const duplicateCount = allRegistrations.filter(r => r.status === 'duplicate').length;
+    const invalidCount = allRegistrations.filter(r => r.status === 'invalid').length;
+    const totalGroups = allGroups.length;
+
+    const withdrawnAfterMatchingCount = allRegistrations.filter(
+      r =>
+        r.status === 'withdrawn' &&
+        r.withdrawnStage === 'after_match' &&
+        (lastMixedAt ? (r.withdrawnAt || 0) > lastMixedAt : true)
     ).length;
 
-    const needsRemix = withdrawnAfterMatchingCount > 0 && !this.data.event.isPublished;
+    const needsRemix = withdrawnAfterMatchingCount > 0 && !eventState.isPublished;
 
-    const dupCheck = this.runDuplicateCheck();
+    const dupCheck = await this.runDuplicateCheck();
 
-    // Internal batch breakdown of active participants
     const batchDistribution: Record<string, number> = {};
-    for (const r of this.data.registrations) {
+    for (const r of allRegistrations) {
       if (r.status === 'active' || r.status === 'valid') {
         batchDistribution[r.batch] = (batchDistribution[r.batch] || 0) + 1;
       }
     }
 
-    // Format groups with full member details
-    const formattedGroups = this.data.groups.map(g => {
+    const formattedGroups = allGroups.map(g => {
       let hasWithdrawnMember = false;
       const members: AdminGroupMember[] = g.memberIds.map(mId => {
-        const reg = this.data.registrations.find(r => r.id === mId);
+        const reg = allRegistrations.find(r => r.id === mId);
         if (reg?.status === 'withdrawn') hasWithdrawnMember = true;
         return {
           id: mId,
@@ -1222,12 +1821,12 @@ class Database {
       withdrawnAfterMatchingCount,
       needsRemix,
       event: {
-        stage: this.data.event.stage,
-        revealTime: this.data.event.revealTime,
-        registrationOpen: this.data.event.registrationOpen,
-        groupsLocked: this.data.event.groupsLocked,
-        isPublished: this.data.event.isPublished,
-        publishedAt: this.data.event.publishedAt,
+        stage: eventState.stage,
+        revealTime: eventState.revealTime,
+        registrationOpen: eventState.registrationOpen,
+        groupsLocked: eventState.groupsLocked,
+        isPublished: eventState.isPublished,
+        publishedAt: eventState.publishedAt,
       },
       duplicateSummary: {
         duplicateCount: dupCheck.duplicateCount,
@@ -1235,7 +1834,7 @@ class Database {
         issues: dupCheck.issues,
       },
       batchDistribution,
-      registrations: this.data.registrations.map(r => ({
+      registrations: allRegistrations.map(r => ({
         id: r.id,
         name: r.name,
         rollNumber: r.rollNumber,
@@ -1251,23 +1850,87 @@ class Database {
         groupId: r.groupId,
       })),
       groups: formattedGroups,
-      lastMixedAt: this.data.lastMixedAt,
+      lastMixedAt,
     };
   }
 
   // Reset to initial seed state (40 registrations, 38 unique, 2 duplicates)
-  public resetDevData(): {
+  public async resetDevData(): Promise<{
     success: boolean;
     totalRegistrations: number;
     activeParticipants: number;
     withdrawnCount: number;
-  } {
-    this.data = {
-      registrations: getInitialSeedRegistrations(),
+  }> {
+    const seeds = getInitialSeedRegistrations();
+    const revealTime = getNextFriday3PMIST().toISOString();
+
+    if (isPostgresConfigured()) {
+      const client = await getClient();
+      try {
+        await client.query('BEGIN');
+        await client.query('DELETE FROM group_members;');
+        await client.query('DELETE FROM groups;');
+        await client.query('DELETE FROM registrations;');
+
+        for (const s of seeds) {
+          await client.query(
+            `INSERT INTO registrations (
+               id, name, roll_number, batch, phone_number,
+               created_at, updated_at, registered_at, status,
+               flag_reason, duplicate_of_roll, group_id, group_assigned, revealed
+             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NULL, false, false);`,
+            [
+              s.id,
+              s.name,
+              s.rollNumber,
+              s.batch,
+              s.phoneNumber,
+              s.createdAt,
+              s.updatedAt,
+              s.registeredAt,
+              s.status,
+              s.flagReason || null,
+              s.duplicateOfRoll || null,
+            ]
+          );
+        }
+
+        await client.query(
+          `UPDATE event_state SET
+             stage = 'REGISTRATION_OPEN',
+             reveal_time = $1,
+             registration_open = true,
+             groups_locked = false,
+             is_published = false,
+             published_at = NULL,
+             last_mixed_at = NULL
+           WHERE id = 1;`,
+          [revealTime]
+        );
+
+        await client.query('COMMIT');
+
+        const activeCount = seeds.filter(r => r.status === 'active' || r.status === 'valid').length;
+        return {
+          success: true,
+          totalRegistrations: seeds.length,
+          activeParticipants: activeCount,
+          withdrawnCount: 0,
+        };
+      } catch (err) {
+        await client.query('ROLLBACK');
+        throw err;
+      } finally {
+        client.release();
+      }
+    }
+
+    this.inMemoryData = {
+      registrations: seeds,
       groups: [],
       event: {
         stage: 'REGISTRATION_OPEN',
-        revealTime: getNextFriday3PMIST().toISOString(),
+        revealTime,
         registrationOpen: true,
         groupsLocked: false,
         isPublished: false,
@@ -1275,23 +1938,64 @@ class Database {
       },
       lastMixedAt: null,
     };
-    this.saveData();
+
     return {
       success: true,
-      totalRegistrations: this.data.registrations.length,
-      activeParticipants: this.getActiveCount(),
+      totalRegistrations: seeds.length,
+      activeParticipants: seeds.filter(r => r.status === 'active' || r.status === 'valid').length,
       withdrawnCount: 0,
     };
   }
 
   // Clear all registrations to test completely empty database / zero states
-  public clearAllData(): { success: boolean; totalRegistrations: number; activeParticipants: number } {
-    this.data = {
+  public async clearAllData(): Promise<{
+    success: boolean;
+    totalRegistrations: number;
+    activeParticipants: number;
+  }> {
+    const revealTime = getNextFriday3PMIST().toISOString();
+
+    if (isPostgresConfigured()) {
+      const client = await getClient();
+      try {
+        await client.query('BEGIN');
+        await client.query('DELETE FROM group_members;');
+        await client.query('DELETE FROM groups;');
+        await client.query('DELETE FROM registrations;');
+
+        await client.query(
+          `UPDATE event_state SET
+             stage = 'REGISTRATION_OPEN',
+             reveal_time = $1,
+             registration_open = true,
+             groups_locked = false,
+             is_published = false,
+             published_at = NULL,
+             last_mixed_at = NULL
+           WHERE id = 1;`,
+          [revealTime]
+        );
+
+        await client.query('COMMIT');
+        return {
+          success: true,
+          totalRegistrations: 0,
+          activeParticipants: 0,
+        };
+      } catch (err) {
+        await client.query('ROLLBACK');
+        throw err;
+      } finally {
+        client.release();
+      }
+    }
+
+    this.inMemoryData = {
       registrations: [],
       groups: [],
       event: {
         stage: 'REGISTRATION_OPEN',
-        revealTime: getNextFriday3PMIST().toISOString(),
+        revealTime,
         registrationOpen: true,
         groupsLocked: false,
         isPublished: false,
@@ -1299,7 +2003,7 @@ class Database {
       },
       lastMixedAt: null,
     };
-    this.saveData();
+
     return {
       success: true,
       totalRegistrations: 0,
