@@ -7,6 +7,7 @@ interface RevealModalProps {
   onClose: () => void;
   isRevealed: boolean;
   onOpenWithdraw: (prefilledRoll?: string) => void;
+  eventId?: string;
 }
 
 export const RevealModal: React.FC<RevealModalProps> = ({
@@ -14,6 +15,7 @@ export const RevealModal: React.FC<RevealModalProps> = ({
   onClose,
   isRevealed,
   onOpenWithdraw,
+  eventId,
 }) => {
   const [rollNumber, setRollNumber] = useState('');
   const [loading, setLoading] = useState(false);
@@ -56,7 +58,7 @@ export const RevealModal: React.FC<RevealModalProps> = ({
       const res = await fetch('/api/group/reveal-my-group', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ rollNumber: rollToFetch.trim() }),
+        body: JSON.stringify({ rollNumber: rollToFetch.trim(), eventId }),
       });
 
       const data: GroupRevealResponse = await res.json();

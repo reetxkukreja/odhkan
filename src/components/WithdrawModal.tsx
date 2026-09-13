@@ -6,6 +6,7 @@ interface WithdrawModalProps {
   onClose: () => void;
   prefilledRoll?: string;
   onWithdrawnSuccess: (newTotalCount?: number) => void;
+  eventId?: string;
 }
 
 export const WithdrawModal: React.FC<WithdrawModalProps> = ({
@@ -13,6 +14,7 @@ export const WithdrawModal: React.FC<WithdrawModalProps> = ({
   onClose,
   prefilledRoll = '',
   onWithdrawnSuccess,
+  eventId,
 }) => {
   const [rollNumber, setRollNumber] = useState(prefilledRoll);
   const [loading, setLoading] = useState(false);
@@ -42,7 +44,7 @@ export const WithdrawModal: React.FC<WithdrawModalProps> = ({
       const res = await fetch('/api/participants/withdraw', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ rollNumber: rollToUse }),
+        body: JSON.stringify({ rollNumber: rollToUse, eventId }),
       });
 
       const data = await res.json();

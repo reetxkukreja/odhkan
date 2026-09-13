@@ -10,6 +10,7 @@ interface JoinModalProps {
   totalCount: number;
   onParticipantJoined: (name: string, roll: string) => void;
   onOpenWithdraw: (prefilledRoll?: string) => void;
+  eventId?: string;
 }
 
 export const JoinModal: React.FC<JoinModalProps> = ({
@@ -19,6 +20,7 @@ export const JoinModal: React.FC<JoinModalProps> = ({
   totalCount,
   onParticipantJoined,
   onOpenWithdraw,
+  eventId,
 }) => {
   const [name, setName] = useState('');
   const [rollNumber, setRollNumber] = useState('');
@@ -70,6 +72,7 @@ export const JoinModal: React.FC<JoinModalProps> = ({
           name: name.trim(),
           rollNumber: rollNumber.trim(),
           phoneNumber: phoneNumber.trim(),
+          eventId,
         }),
       });
 

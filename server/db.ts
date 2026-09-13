@@ -4,6 +4,7 @@ import {
   query,
   getClient,
 } from './postgres';
+import { parseISTDate, istToUtcIso } from './ist';
 
 export interface Registration {
   id: string;
@@ -22,6 +23,7 @@ export interface Registration {
   groupId?: string | null;
   groupAssigned: boolean;
   revealed: boolean;
+  eventId?: string;
 }
 
 export interface GroupMemberSummary {
@@ -52,6 +54,7 @@ export interface Group {
   memberIds: string[]; // registration ids
   createdAt: number;
   locked: boolean;
+  eventId?: string;
 }
 
 export type EventStage =
@@ -64,9 +67,33 @@ export type EventStage =
   | 'READY_TO_PUBLISH'
   | 'PUBLISHED';
 
+export interface OdhkanEvent {
+  id: string;
+  name: string;
+  eventDate: string; // e.g. "2026-09-19"
+  revealTime: string; // ISO string e.g. "2026-09-19T09:30:00.000Z"
+  registrationStart?: string | null;
+  registrationEnd?: string | null;
+  status: 'upcoming' | 'open' | 'closed' | 'mixed' | 'revealed' | 'completed' | 'archived';
+  stage: EventStage;
+  registrationOpen: boolean;
+  groupsLocked: boolean;
+  isPublished: boolean;
+  publishedAt: number | null;
+  lastMixedAt: number | null;
+  createdAt: number;
+  updatedAt: number;
+  participantsCount?: number;
+  groupsCount?: number;
+  eventDay?: string;
+  eventTimeFormatted?: string;
+  eventDisplayTitle?: string;
+  isActive?: boolean;
+}
+
 export interface EventState {
   stage: EventStage;
-  revealTime: string; // ISO string for Friday 15:00 IST
+  revealTime: string; // ISO string for event reveal in IST
   registrationOpen: boolean;
   groupsLocked: boolean;
   isPublished: boolean;
@@ -101,6 +128,8 @@ export interface IntegrityCheckResult {
 export interface DatabaseSchema {
   registrations: Registration[];
   groups: Group[];
+  events: OdhkanEvent[];
+  activeEventId: string;
   event: EventState;
   lastMixedAt: number | null;
 }
@@ -196,8 +225,98 @@ export function getInitialSeedRegistrations(): Registration[] {
       groupId: null,
       groupAssigned: false,
       revealed: false,
+      eventId: 'evt_2026_09_19',
     };
   });
+}
+
+export function getInitialSeedEvents(): OdhkanEvent[] {
+  return [
+    {
+      id: 'evt_2026_09_19',
+      name: 'Odhkan #1 - Friday Meet',
+      eventDate: '2026-09-19',
+      revealTime: '2026-09-19T09:30:00.000Z',
+      registrationStart: '2026-09-10T00:00:00.000Z',
+      registrationEnd: '2026-09-19T09:00:00.000Z',
+      status: 'open',
+      stage: 'REGISTRATION_OPEN',
+      registrationOpen: true,
+      groupsLocked: false,
+      isPublished: false,
+      publishedAt: null,
+      lastMixedAt: null,
+      createdAt: Date.now() - 3 * 86400000,
+      updatedAt: Date.now(),
+      eventDay: 'Friday',
+      eventTimeFormatted: '3:00 PM',
+      eventDisplayTitle: 'Friday · 3:00 PM',
+    },
+    {
+      id: 'evt_2026_09_26',
+      name: 'Odhkan #2 - Friday Meet',
+      eventDate: '2026-09-26',
+      revealTime: '2026-09-26T09:30:00.000Z',
+      registrationStart: '2026-09-19T10:00:00.000Z',
+      registrationEnd: '2026-09-26T09:00:00.000Z',
+      status: 'upcoming',
+      stage: 'REGISTRATION_OPEN',
+      registrationOpen: true,
+      groupsLocked: false,
+      isPublished: false,
+      publishedAt: null,
+      lastMixedAt: null,
+      createdAt: Date.now() - 2 * 86400000,
+      updatedAt: Date.now(),
+      eventDay: 'Friday',
+      eventTimeFormatted: '3:00 PM',
+      eventDisplayTitle: 'Friday · 3:00 PM',
+    },
+    {
+      id: 'evt_2026_09_05',
+      name: 'Odhkan #0 - Inaugural Meet',
+      eventDate: '2026-09-05',
+      revealTime: '2026-09-05T09:30:00.000Z',
+      registrationStart: '2026-08-30T00:00:00.000Z',
+      registrationEnd: '2026-09-05T09:00:00.000Z',
+      status: 'completed',
+      stage: 'PUBLISHED',
+      registrationOpen: false,
+      groupsLocked: true,
+      isPublished: true,
+      publishedAt: Date.now() - 8 * 86400000,
+      lastMixedAt: Date.now() - 8 * 86400000,
+      createdAt: Date.now() - 14 * 86400000,
+      updatedAt: Date.now() - 8 * 86400000,
+      eventDay: 'Friday',
+      eventTimeFormatted: '3:00 PM',
+      eventDisplayTitle: 'Friday · 3:00 PM',
+    },
+  ];
+}
+
+function mapRowToEvent(row: any): OdhkanEvent {
+  const ist = parseISTDate(row.reveal_time);
+  return {
+    id: row.id,
+    name: row.name,
+    eventDate: row.event_date || ist.dateFormatted,
+    revealTime: row.reveal_time,
+    registrationStart: row.registration_start || null,
+    registrationEnd: row.registration_end || null,
+    status: row.status || 'open',
+    stage: row.stage || 'REGISTRATION_OPEN',
+    registrationOpen: Boolean(row.registration_open),
+    groupsLocked: Boolean(row.groups_locked),
+    isPublished: Boolean(row.is_published),
+    publishedAt: row.published_at ? Number(row.published_at) : null,
+    lastMixedAt: row.last_mixed_at ? Number(row.last_mixed_at) : null,
+    createdAt: Number(row.created_at || Date.now()),
+    updatedAt: Number(row.updated_at || Date.now()),
+    eventDay: ist.dayName,
+    eventTimeFormatted: ist.timeFormatted,
+    eventDisplayTitle: ist.displayTitle,
+  };
 }
 
 function mapRowToRegistration(row: any): Registration {
@@ -218,19 +337,24 @@ function mapRowToRegistration(row: any): Registration {
     groupId: row.group_id || null,
     groupAssigned: Boolean(row.group_assigned || row.group_id),
     revealed: Boolean(row.revealed),
+    eventId: row.event_id || 'evt_2026_09_19',
   };
 }
 
 class Database {
   private inMemoryData: DatabaseSchema;
+  private currentActiveEventId: string = 'evt_2026_09_19';
 
   constructor() {
+    const seedEvents = getInitialSeedEvents();
     this.inMemoryData = {
       registrations: getInitialSeedRegistrations(),
       groups: [],
+      events: seedEvents,
+      activeEventId: 'evt_2026_09_19',
       event: {
         stage: 'REGISTRATION_OPEN',
-        revealTime: getNextFriday3PMIST().toISOString(),
+        revealTime: seedEvents[0].revealTime,
         registrationOpen: true,
         groupsLocked: false,
         isPublished: false,
@@ -310,7 +434,383 @@ class Database {
     return this.inMemoryData.registrations.filter(r => r.status === 'active' || r.status === 'valid').length;
   }
 
-  // 1. Public Status - Live Counter
+  // --- MULTI-EVENT MANAGEMENT METHODS ---
+
+  public async getEvents(): Promise<OdhkanEvent[]> {
+    if (isPostgresConfigured()) {
+      const res = await query(`
+        SELECT e.*,
+          COALESCE(r.p_count, 0)::int as participants_count,
+          COALESCE(g.g_count, 0)::int as groups_count
+        FROM events e
+        LEFT JOIN (
+          SELECT event_id, COUNT(*)::int as p_count 
+          FROM registrations 
+          WHERE status IN ('active', 'valid') 
+          GROUP BY event_id
+        ) r ON e.id = r.event_id
+        LEFT JOIN (
+          SELECT event_id, COUNT(*)::int as g_count 
+          FROM groups 
+          GROUP BY event_id
+        ) g ON e.id = g.event_id
+        ORDER BY e.reveal_time ASC;
+      `);
+      return res.rows.map(row => {
+        const evt = mapRowToEvent(row);
+        evt.participantsCount = row.participants_count || 0;
+        evt.groupsCount = row.groups_count || 0;
+        evt.isActive = evt.id === this.currentActiveEventId;
+        return evt;
+      });
+    }
+
+    return this.inMemoryData.events.map(evt => {
+      const ist = parseISTDate(evt.revealTime);
+      const pCount = this.inMemoryData.registrations.filter(
+        r => (!r.eventId || r.eventId === evt.id) && (r.status === 'active' || r.status === 'valid')
+      ).length;
+      const gCount = this.inMemoryData.groups.filter(g => !g.eventId || g.eventId === evt.id).length;
+      return {
+        ...evt,
+        participantsCount: pCount,
+        groupsCount: gCount,
+        eventDay: ist.dayName,
+        eventTimeFormatted: ist.timeFormatted,
+        eventDisplayTitle: ist.displayTitle,
+        isActive: evt.id === this.currentActiveEventId,
+      };
+    });
+  }
+
+  public async getEventById(id: string): Promise<OdhkanEvent | null> {
+    const events = await this.getEvents();
+    return events.find(e => e.id === id) || null;
+  }
+
+  public async getActiveEvent(): Promise<OdhkanEvent> {
+    const now = Date.now();
+    const events = await this.getEvents();
+
+    // 1. If admin explicitly pinned/selected an active event
+    if (this.currentActiveEventId) {
+      const pinned = events.find(e => e.id === this.currentActiveEventId);
+      if (pinned && pinned.status !== 'completed' && pinned.status !== 'archived') {
+        return pinned;
+      }
+    }
+
+    // 2. Automatic progression:
+    // Event 1 -> Event 2 after Event 1 is over!
+    // An event remains the active display event while upcoming OR within 12 hours after its reveal time.
+    const sorted = [...events].sort(
+      (a, b) => new Date(a.revealTime).getTime() - new Date(b.revealTime).getTime()
+    );
+
+    for (const evt of sorted) {
+      if (evt.status === 'completed' || evt.status === 'archived') continue;
+      const revealMs = new Date(evt.revealTime).getTime();
+      // If reveal is in the future, OR if it revealed within the last 12 hours
+      if (revealMs > now || (now - revealMs <= 12 * 3600 * 1000)) {
+        this.currentActiveEventId = evt.id;
+        return evt;
+      }
+    }
+
+    // 3. If any future event exists
+    const nextFuture = sorted.find(e => new Date(e.revealTime).getTime() > now);
+    if (nextFuture) {
+      this.currentActiveEventId = nextFuture.id;
+      return nextFuture;
+    }
+
+    // 4. Return latest event or default seed
+    const fallback = sorted[sorted.length - 1] || getInitialSeedEvents()[0];
+    this.currentActiveEventId = fallback.id;
+    return fallback;
+  }
+
+  public async setActiveEvent(id: string): Promise<OdhkanEvent> {
+    const event = await this.getEventById(id);
+    if (!event) {
+      throw new Error(`Event ${id} not found.`);
+    }
+    this.currentActiveEventId = id;
+    if (isPostgresConfigured()) {
+      await query(
+        `UPDATE event_state SET
+           reveal_time = $1,
+           stage = $2,
+           registration_open = $3,
+           groups_locked = $4,
+           is_published = $5,
+           published_at = $6,
+           last_mixed_at = $7
+         WHERE id = 1;`,
+        [
+          event.revealTime,
+          event.stage,
+          event.registrationOpen,
+          event.groupsLocked,
+          event.isPublished,
+          event.publishedAt,
+          event.lastMixedAt,
+        ]
+      );
+    }
+    return event;
+  }
+
+  public async createEvent(data: {
+    name?: string;
+    date: string; // "YYYY-MM-DD" e.g. "2026-09-19"
+    time: string; // "HH:mm" e.g. "15:00"
+    registrationEnd?: string;
+  }): Promise<OdhkanEvent> {
+    const revealTime = istToUtcIso(data.date, data.time);
+    const ist = parseISTDate(revealTime);
+    const now = Date.now();
+    const eventId = `evt_${data.date.replace(/-/g, '_')}_${Math.random().toString(36).substring(2, 6)}`;
+    const eventName = data.name?.trim() || `Odhkan - ${ist.dayName}, ${ist.dateFormatted}`;
+
+    let regEnd = data.registrationEnd;
+    if (!regEnd) {
+      // Default to 30 mins before reveal
+      const revealMs = new Date(revealTime).getTime();
+      regEnd = new Date(revealMs - 30 * 60 * 1000).toISOString();
+    }
+
+    const newEvent: OdhkanEvent = {
+      id: eventId,
+      name: eventName,
+      eventDate: data.date,
+      revealTime,
+      registrationStart: new Date(now).toISOString(),
+      registrationEnd: regEnd,
+      status: 'upcoming',
+      stage: 'REGISTRATION_OPEN',
+      registrationOpen: true,
+      groupsLocked: false,
+      isPublished: false,
+      publishedAt: null,
+      lastMixedAt: null,
+      createdAt: now,
+      updatedAt: now,
+      eventDay: ist.dayName,
+      eventTimeFormatted: ist.timeFormatted,
+      eventDisplayTitle: ist.displayTitle,
+    };
+
+    if (isPostgresConfigured()) {
+      await query(
+        `INSERT INTO events (
+           id, name, event_date, reveal_time, registration_start, registration_end,
+           status, stage, registration_open, groups_locked, is_published,
+           published_at, last_mixed_at, created_at, updated_at
+         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NULL, NULL, $12, $12);`,
+        [
+          newEvent.id,
+          newEvent.name,
+          newEvent.eventDate,
+          newEvent.revealTime,
+          newEvent.registrationStart,
+          newEvent.registrationEnd,
+          newEvent.status,
+          newEvent.stage,
+          newEvent.registrationOpen,
+          newEvent.groupsLocked,
+          newEvent.isPublished,
+          now,
+        ]
+      );
+    } else {
+      this.inMemoryData.events.push(newEvent);
+    }
+
+    return newEvent;
+  }
+
+  public async updateEvent(
+    id: string,
+    data: {
+      name?: string;
+      date?: string;
+      time?: string;
+      registrationEnd?: string;
+      status?: string;
+      registrationOpen?: boolean;
+    }
+  ): Promise<OdhkanEvent> {
+    const existing = await this.getEventById(id);
+    if (!existing) {
+      throw new Error(`Event with ID ${id} not found.`);
+    }
+
+    let updatedReveal = existing.revealTime;
+    let updatedDate = existing.eventDate;
+    if (data.date && data.time) {
+      updatedReveal = istToUtcIso(data.date, data.time);
+      updatedDate = data.date;
+    } else if (data.date) {
+      const prevIst = parseISTDate(existing.revealTime);
+      updatedReveal = istToUtcIso(data.date, `${String(prevIst.hours).padStart(2, '0')}:${String(prevIst.minutes).padStart(2, '0')}`);
+      updatedDate = data.date;
+    }
+
+    const updatedName = data.name !== undefined ? data.name.trim() : existing.name;
+    const updatedStatus = (data.status || existing.status) as any;
+    const updatedRegOpen = data.registrationOpen !== undefined ? data.registrationOpen : existing.registrationOpen;
+    const updatedRegEnd = data.registrationEnd !== undefined ? data.registrationEnd : existing.registrationEnd;
+    const now = Date.now();
+
+    if (isPostgresConfigured()) {
+      await query(
+        `UPDATE events SET
+           name = $1,
+           event_date = $2,
+           reveal_time = $3,
+           registration_end = $4,
+           status = $5,
+           registration_open = $6,
+           updated_at = $7
+         WHERE id = $8;`,
+        [
+          updatedName,
+          updatedDate,
+          updatedReveal,
+          updatedRegEnd,
+          updatedStatus,
+          updatedRegOpen,
+          now,
+          id,
+        ]
+      );
+      if (this.currentActiveEventId === id) {
+        await query(
+          `UPDATE event_state SET
+             reveal_time = $1,
+             registration_open = $2
+           WHERE id = 1;`,
+          [updatedReveal, updatedRegOpen]
+        );
+      }
+    } else {
+      existing.name = updatedName;
+      existing.eventDate = updatedDate;
+      existing.revealTime = updatedReveal;
+      existing.registrationEnd = updatedRegEnd;
+      existing.status = updatedStatus;
+      existing.registrationOpen = updatedRegOpen;
+      existing.updatedAt = now;
+      if (this.currentActiveEventId === id) {
+        this.inMemoryData.event.revealTime = updatedReveal;
+        this.inMemoryData.event.registrationOpen = updatedRegOpen;
+      }
+    }
+
+    return (await this.getEventById(id))!;
+  }
+
+  public async deleteEvent(id: string): Promise<{ success: boolean; message?: string }> {
+    if (isPostgresConfigured()) {
+      const client = await getClient();
+      try {
+        await client.query('BEGIN');
+        await client.query(`DELETE FROM group_members WHERE group_id IN (SELECT id FROM groups WHERE event_id = $1);`, [id]);
+        await client.query(`DELETE FROM groups WHERE event_id = $1;`, [id]);
+        await client.query(`DELETE FROM registrations WHERE event_id = $1;`, [id]);
+        await client.query(`DELETE FROM events WHERE id = $1;`, [id]);
+        await client.query('COMMIT');
+        if (this.currentActiveEventId === id) {
+          this.currentActiveEventId = '';
+        }
+        return { success: true };
+      } catch (err) {
+        await client.query('ROLLBACK');
+        throw err;
+      } finally {
+        client.release();
+      }
+    }
+
+    this.inMemoryData.events = this.inMemoryData.events.filter(e => e.id !== id);
+    this.inMemoryData.groups = this.inMemoryData.groups.filter(g => g.eventId !== id);
+    this.inMemoryData.registrations = this.inMemoryData.registrations.filter(r => r.eventId !== id);
+    if (this.currentActiveEventId === id) {
+      this.currentActiveEventId = '';
+    }
+    return { success: true };
+  }
+
+  public async getEventHistory(id: string) {
+    const event = await this.getEventById(id);
+    if (!event) return null;
+
+    let participants: Registration[] = [];
+    let groups: Group[] = [];
+
+    if (isPostgresConfigured()) {
+      const pRes = await query(`SELECT * FROM registrations WHERE event_id = $1 ORDER BY registered_at ASC;`, [id]);
+      participants = pRes.rows.map(mapRowToRegistration);
+
+      const gRes = await query(`
+        SELECT g.id, g.name, g.created_at, g.locked, g.event_id,
+          COALESCE(
+            json_agg(gm.registration_id) FILTER (WHERE gm.registration_id IS NOT NULL),
+            '[]'
+          ) as member_ids
+        FROM groups g
+        LEFT JOIN group_members gm ON g.id = gm.group_id
+        WHERE g.event_id = $1
+        GROUP BY g.id, g.name, g.created_at, g.locked, g.event_id
+        ORDER BY g.name ASC;
+      `, [id]);
+      groups = gRes.rows.map(row => ({
+        id: row.id,
+        name: row.name,
+        createdAt: Number(row.created_at),
+        locked: Boolean(row.locked),
+        memberIds: row.member_ids || [],
+        eventId: row.event_id,
+      }));
+    } else {
+      participants = this.inMemoryData.registrations.filter(r => r.eventId === id);
+      groups = this.inMemoryData.groups.filter(g => g.eventId === id);
+    }
+
+    const formattedGroups = groups.map(g => {
+      const members = g.memberIds.map(mId => {
+        const reg = participants.find(r => r.id === mId);
+        return {
+          id: mId,
+          name: reg ? reg.name : 'Unknown',
+          rollNumber: reg ? reg.rollNumber : 'N/A',
+          batch: reg ? reg.batch : 'N/A',
+          phoneNumber: reg?.phoneNumber || 'N/A',
+          status: reg?.status || 'active',
+        };
+      });
+      return {
+        id: g.id,
+        name: g.name,
+        membersCount: members.length,
+        uniqueBatchesCount: new Set(members.map(m => m.batch)).size,
+        members,
+        locked: g.locked,
+        hasWithdrawnMember: members.some(m => m.status === 'withdrawn'),
+      };
+    });
+
+    return {
+      event,
+      participantsCount: participants.filter(r => r.status === 'active' || r.status === 'valid').length,
+      groupsCount: formattedGroups.length,
+      participants,
+      groups: formattedGroups,
+    };
+  }
+
+  // 1. Public Status - Live Counter & Event Details
   public async getPublicStatus(): Promise<{
     totalCount: number;
     eventStatus: string;
@@ -318,50 +818,77 @@ class Database {
     isRevealed: boolean;
     groupsCount: number;
     registrationOpen: boolean;
+    eventId: string;
+    eventName: string;
+    eventDate: string;
+    eventDay: string;
+    eventTimeFormatted: string;
+    eventDisplayTitle: string;
+    registrationDeadline?: string;
+    nextEvent?: any;
   }> {
+    const activeEvent = await this.getActiveEvent();
+    const ist = parseISTDate(activeEvent.revealTime);
+    const now = Date.now();
+    const revealMs = new Date(activeEvent.revealTime).getTime();
+    const isOverdue = revealMs <= now;
+    const isRevealed = activeEvent.isPublished || (isOverdue && activeEvent.groupsLocked);
+
+    let activeCount = 0;
+    let groupsCount = 0;
+
     if (isPostgresConfigured()) {
       const activeRes = await query(
-        `SELECT COUNT(*)::int as count FROM registrations WHERE status IN ('active', 'valid');`
+        `SELECT COUNT(*)::int as count FROM registrations WHERE (event_id = $1 OR event_id IS NULL) AND status IN ('active', 'valid');`,
+        [activeEvent.id]
       );
-      const activeCount = activeRes.rows[0]?.count || 0;
+      activeCount = activeRes.rows[0]?.count || 0;
 
-      const groupRes = await query(`SELECT COUNT(*)::int as count FROM groups;`);
-      const groupsCount = groupRes.rows[0]?.count || 0;
-
-      const eventRes = await query(`SELECT * FROM event_state WHERE id = 1;`);
-      const eventRow = eventRes.rows[0];
-      const revealTime = eventRow?.reveal_time || getNextFriday3PMIST().toISOString();
-      const registrationOpen = eventRow ? Boolean(eventRow.registration_open) : true;
-      const groupsLocked = eventRow ? Boolean(eventRow.groups_locked) : false;
-      const isPublished = eventRow ? Boolean(eventRow.is_published) : false;
-
-      const isOverdue = new Date(revealTime).getTime() <= Date.now();
-      const isRevealed = isPublished || (isOverdue && groupsLocked);
-
-      return {
-        totalCount: activeCount,
-        eventStatus: isRevealed ? 'revealed' : groupsLocked ? 'locked' : 'open',
-        revealTime,
-        isRevealed,
-        groupsCount,
-        registrationOpen,
-      };
+      const groupRes = await query(
+        `SELECT COUNT(*)::int as count FROM groups WHERE event_id = $1 OR event_id IS NULL;`,
+        [activeEvent.id]
+      );
+      groupsCount = groupRes.rows[0]?.count || 0;
+    } else {
+      activeCount = this.inMemoryData.registrations.filter(
+        r => (!r.eventId || r.eventId === activeEvent.id) && (r.status === 'active' || r.status === 'valid')
+      ).length;
+      groupsCount = this.inMemoryData.groups.filter(
+        g => !g.eventId || g.eventId === activeEvent.id
+      ).length;
     }
 
-    const activeCount = this.inMemoryData.registrations.filter(
-      r => r.status === 'active' || r.status === 'valid'
-    ).length;
-    const isOverdue = new Date(this.inMemoryData.event.revealTime).getTime() <= Date.now();
-    const isRevealed =
-      this.inMemoryData.event.isPublished || (isOverdue && this.inMemoryData.event.groupsLocked);
+    // Check next upcoming event after this one
+    const allEvents = await this.getEvents();
+    const nextScheduled = allEvents
+      .filter(e => e.id !== activeEvent.id && new Date(e.revealTime).getTime() > revealMs)
+      .sort((a, b) => new Date(a.revealTime).getTime() - new Date(b.revealTime).getTime())[0];
 
     return {
       totalCount: activeCount,
-      eventStatus: isRevealed ? 'revealed' : this.inMemoryData.event.groupsLocked ? 'locked' : 'open',
-      revealTime: this.inMemoryData.event.revealTime,
+      eventStatus: isRevealed ? 'revealed' : activeEvent.groupsLocked ? 'locked' : 'open',
+      revealTime: activeEvent.revealTime,
       isRevealed,
-      groupsCount: this.inMemoryData.groups.length,
-      registrationOpen: this.inMemoryData.event.registrationOpen,
+      groupsCount,
+      registrationOpen: activeEvent.registrationOpen,
+      eventId: activeEvent.id,
+      eventName: activeEvent.name,
+      eventDate: activeEvent.eventDate || ist.dateFormatted,
+      eventDay: ist.dayName,
+      eventTimeFormatted: ist.timeFormatted,
+      eventDisplayTitle: ist.displayTitle,
+      registrationDeadline: activeEvent.registrationEnd || undefined,
+      nextEvent: nextScheduled
+        ? {
+            id: nextScheduled.id,
+            name: nextScheduled.name,
+            eventDate: nextScheduled.eventDate,
+            revealTime: nextScheduled.revealTime,
+            eventDay: nextScheduled.eventDay || 'Friday',
+            eventTimeFormatted: nextScheduled.eventTimeFormatted || '3:00 PM',
+            eventDisplayTitle: nextScheduled.eventDisplayTitle || 'Friday · 3:00 PM',
+          }
+        : null,
     };
   }
 
@@ -369,13 +896,15 @@ class Database {
   public async join(
     name: string,
     rawRoll: string,
-    rawPhone: string
+    rawPhone: string,
+    targetEventId?: string
   ): Promise<{
     success: boolean;
     error?: string;
     subtext?: string;
     participant?: { id: string; name: string; rollNumber: string; status: string };
     totalCount: number;
+    eventId?: string;
   }> {
     const trimmedName = (name || '').trim();
     if (!trimmedName || trimmedName.length < 2) {
@@ -407,23 +936,25 @@ class Database {
       };
     }
 
-    if (isPostgresConfigured()) {
-      // Check event registration open
-      const eventRes = await query(`SELECT registration_open FROM event_state WHERE id = 1;`);
-      const isRegOpen = eventRes.rows[0]?.registration_open !== false;
-      if (!isRegOpen) {
-        const activeCount = await this.getActiveCount();
-        return {
-          success: false,
-          error: 'Registrations for this Odhkan are currently closed.',
-          totalCount: activeCount,
-        };
-      }
+    const targetEvent = targetEventId
+      ? ((await this.getEventById(targetEventId)) || (await this.getActiveEvent()))
+      : await this.getActiveEvent();
 
-      // Check existing registration
+    if (!targetEvent.registrationOpen) {
+      const activeCount = await this.getActiveCount();
+      return {
+        success: false,
+        error: `Registrations for ${targetEvent.name} are currently closed.`,
+        totalCount: activeCount,
+        eventId: targetEvent.id,
+      };
+    }
+
+    if (isPostgresConfigured()) {
+      // Check existing registration in this event
       const existingRes = await query(
-        `SELECT * FROM registrations WHERE roll_number = $1 ORDER BY registered_at ASC;`,
-        [rollValidation.normalizedRoll]
+        `SELECT * FROM registrations WHERE roll_number = $1 AND (event_id = $2 OR event_id IS NULL) ORDER BY registered_at ASC;`,
+        [rollValidation.normalizedRoll, targetEvent.id]
       );
 
       if (existingRes.rows.length > 0) {
@@ -439,9 +970,10 @@ class Database {
                phone_number = $2,
                updated_at = $3,
                withdrawn_stage = NULL,
-               withdrawn_at = NULL
-             WHERE id = $4;`,
-            [trimmedName, phoneValidation.normalizedPhone, now, existing.id]
+               withdrawn_at = NULL,
+               event_id = $4
+             WHERE id = $5;`,
+            [trimmedName, phoneValidation.normalizedPhone, now, targetEvent.id, existing.id]
           );
 
           const activeCount = await this.getActiveCount();
@@ -454,6 +986,7 @@ class Database {
               status: 'active',
             },
             totalCount: activeCount,
+            eventId: targetEvent.id,
           };
         }
 
@@ -464,8 +997,8 @@ class Database {
           `INSERT INTO registrations (
              id, name, roll_number, batch, phone_number,
              created_at, updated_at, registered_at, status,
-             flag_reason, duplicate_of_roll, group_id, group_assigned, revealed
-           ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'duplicate', $9, $10, NULL, false, false);`,
+             flag_reason, duplicate_of_roll, group_id, group_assigned, revealed, event_id
+           ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'duplicate', $9, $10, NULL, false, false, $11);`,
           [
             dupId,
             trimmedName,
@@ -477,6 +1010,7 @@ class Database {
             now,
             `Duplicate registration of roll number ${rollValidation.normalizedRoll}`,
             rollValidation.normalizedRoll,
+            targetEvent.id,
           ]
         );
 
@@ -484,7 +1018,7 @@ class Database {
         return {
           success: false,
           error: "You're already in Odhkan.",
-          subtext: "You're all set. See you Friday at 3.",
+          subtext: `You're all set. See you on ${targetEvent.eventDay || 'Friday'} at ${targetEvent.eventTimeFormatted || '3 PM'}.`,
           participant: {
             id: existing.id,
             name: existing.name,
@@ -492,6 +1026,7 @@ class Database {
             status: existing.status,
           },
           totalCount: activeCount,
+          eventId: targetEvent.id,
         };
       }
 
@@ -502,8 +1037,8 @@ class Database {
         `INSERT INTO registrations (
            id, name, roll_number, batch, phone_number,
            created_at, updated_at, registered_at, status,
-           group_id, group_assigned, revealed
-         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'active', NULL, false, false);`,
+           group_id, group_assigned, revealed, event_id
+         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'active', NULL, false, false, $9);`,
         [
           newId,
           trimmedName,
@@ -513,6 +1048,7 @@ class Database {
           now,
           now,
           now,
+          targetEvent.id,
         ]
       );
 
@@ -526,20 +1062,13 @@ class Database {
           status: 'active',
         },
         totalCount: activeCount,
+        eventId: targetEvent.id,
       };
     }
 
     // In-memory fallback
-    if (!this.inMemoryData.event.registrationOpen) {
-      return {
-        success: false,
-        error: 'Registrations for this Odhkan are currently closed.',
-        totalCount: await this.getActiveCount(),
-      };
-    }
-
     const existingIndex = this.inMemoryData.registrations.findIndex(
-      r => r.rollNumber === rollValidation.normalizedRoll
+      r => r.rollNumber === rollValidation.normalizedRoll && (!r.eventId || r.eventId === targetEvent.id)
     );
 
     if (existingIndex !== -1) {
@@ -551,6 +1080,7 @@ class Database {
         existing.updatedAt = Date.now();
         existing.withdrawnStage = undefined;
         existing.withdrawnAt = null;
+        existing.eventId = targetEvent.id;
 
         return {
           success: true,
@@ -561,6 +1091,7 @@ class Database {
             status: 'active',
           },
           totalCount: await this.getActiveCount(),
+          eventId: targetEvent.id,
         };
       }
 
@@ -580,13 +1111,14 @@ class Database {
         groupId: null,
         groupAssigned: false,
         revealed: false,
+        eventId: targetEvent.id,
       };
       this.inMemoryData.registrations.push(duplicateEntry);
 
       return {
         success: false,
         error: "You're already in Odhkan.",
-        subtext: "You're all set. See you Friday at 3.",
+        subtext: `You're all set. See you on ${targetEvent.eventDay || 'Friday'} at ${targetEvent.eventTimeFormatted || '3 PM'}.`,
         participant: {
           id: existing.id,
           name: existing.name,
@@ -594,6 +1126,7 @@ class Database {
           status: existing.status,
         },
         totalCount: await this.getActiveCount(),
+        eventId: targetEvent.id,
       };
     }
 
@@ -611,6 +1144,7 @@ class Database {
       groupId: null,
       groupAssigned: false,
       revealed: false,
+      eventId: targetEvent.id,
     };
 
     this.inMemoryData.registrations.push(newReg);
@@ -623,11 +1157,12 @@ class Database {
         status: newReg.status,
       },
       totalCount: await this.getActiveCount(),
+      eventId: targetEvent.id,
     };
   }
 
   // 3. "CAN'T MAKE IT TODAY" WITHDRAWAL FLOW
-  public async withdraw(rawRoll: string): Promise<{
+  public async withdraw(rawRoll: string, eventId?: string): Promise<{
     success: boolean;
     error?: string;
     message?: string;
@@ -645,16 +1180,29 @@ class Database {
       };
     }
 
+    const targetEvent = eventId
+      ? ((await this.getEventById(eventId)) || (await this.getActiveEvent()))
+      : await this.getActiveEvent();
+
+    if (targetEvent.isPublished) {
+      const activeCount = await this.getActiveCount();
+      return {
+        success: false,
+        error: "The list is already out. You can't withdraw now.",
+        totalCount: activeCount,
+      };
+    }
+
     if (isPostgresConfigured()) {
       const regRes = await query(
-        `SELECT * FROM registrations WHERE roll_number = $1 AND status IN ('active', 'valid');`,
-        [validation.normalizedRoll]
+        `SELECT * FROM registrations WHERE roll_number = $1 AND (event_id = $2 OR event_id IS NULL) AND status IN ('active', 'valid');`,
+        [validation.normalizedRoll, targetEvent.id]
       );
 
       if (regRes.rows.length === 0) {
         const alreadyRes = await query(
-          `SELECT * FROM registrations WHERE roll_number = $1 AND status = 'withdrawn';`,
-          [validation.normalizedRoll]
+          `SELECT * FROM registrations WHERE roll_number = $1 AND (event_id = $2 OR event_id IS NULL) AND status = 'withdrawn';`,
+          [validation.normalizedRoll, targetEvent.id]
         );
         const activeCount = await this.getActiveCount();
         if (alreadyRes.rows.length > 0) {
@@ -672,27 +1220,17 @@ class Database {
       }
 
       const reg = mapRowToRegistration(regRes.rows[0]);
-      const eventRes = await query(`SELECT is_published FROM event_state WHERE id = 1;`);
-      const isPublished = Boolean(eventRes.rows[0]?.is_published);
 
-      const groupCountRes = await query(`SELECT COUNT(*)::int as count FROM groups;`);
+      const groupCountRes = await query(
+        `SELECT COUNT(*)::int as count FROM groups WHERE event_id = $1 OR event_id IS NULL;`,
+        [targetEvent.id]
+      );
       const groupsCount = groupCountRes.rows[0]?.count || 0;
 
       let stage: 'before_match' | 'after_match' | 'after_reveal' = 'before_match';
       const now = Date.now();
 
-      if (isPublished) {
-        stage = 'after_reveal';
-        await query(
-          `UPDATE registrations SET
-             status = 'withdrawn',
-             withdrawn_at = $1,
-             updated_at = $1,
-             withdrawn_stage = 'after_reveal'
-           WHERE id = $2;`,
-          [now, reg.id]
-        );
-      } else if (groupsCount > 0) {
+      if (groupsCount > 0) {
         stage = 'after_match';
         await query(
           `UPDATE registrations SET
@@ -705,7 +1243,12 @@ class Database {
            WHERE id = $2;`,
           [now, reg.id]
         );
-        await query(`DELETE FROM group_members WHERE registration_id = $1;`, [reg.id]);
+        await query(
+          `DELETE FROM group_members
+           WHERE registration_id = $1
+             AND group_id IN (SELECT id FROM groups WHERE event_id = $2 OR event_id IS NULL);`,
+          [reg.id, targetEvent.id]
+        );
       } else {
         stage = 'before_match';
         await query(
@@ -733,12 +1276,16 @@ class Database {
 
     // In-memory fallback
     const reg = this.inMemoryData.registrations.find(
-      r => r.rollNumber === validation.normalizedRoll && (r.status === 'active' || r.status === 'valid')
+      r => r.rollNumber === validation.normalizedRoll &&
+           (!r.eventId || r.eventId === targetEvent.id) &&
+           (r.status === 'active' || r.status === 'valid')
     );
 
     if (!reg) {
       const alreadyWithdrawn = this.inMemoryData.registrations.find(
-        r => r.rollNumber === validation.normalizedRoll && r.status === 'withdrawn'
+        r => r.rollNumber === validation.normalizedRoll &&
+             (!r.eventId || r.eventId === targetEvent.id) &&
+             r.status === 'withdrawn'
       );
       if (alreadyWithdrawn) {
         return {
@@ -760,10 +1307,11 @@ class Database {
     reg.updatedAt = now;
 
     let stage: 'before_match' | 'after_match' | 'after_reveal' = 'before_match';
-    if (this.inMemoryData.event.isPublished) {
-      stage = 'after_reveal';
-      reg.withdrawnStage = 'after_reveal';
-    } else if (this.inMemoryData.groups.length > 0) {
+    const eventGroups = this.inMemoryData.groups.filter(
+      g => !g.eventId || g.eventId === targetEvent.id
+    );
+
+    if (eventGroups.length > 0) {
       stage = 'after_match';
       reg.withdrawnStage = 'after_match';
       reg.groupAssigned = false;
@@ -792,7 +1340,7 @@ class Database {
   }
 
   // 4. Check participant status
-  public async getParticipantStatus(rawRoll: string): Promise<{
+  public async getParticipantStatus(rawRoll: string, eventId?: string): Promise<{
     registered: boolean;
     participant?: {
       name: string;
@@ -860,7 +1408,7 @@ class Database {
   }
 
   // 5. Public Group Reveal Lookup (ONLY AFTER PUBLISH)
-  public async revealGroupForRoll(rawRoll: string): Promise<{
+  public async revealGroupForRoll(rawRoll: string, eventId?: string): Promise<{
     success: boolean;
     error?: string;
     subtext?: string;
@@ -1026,7 +1574,7 @@ class Database {
   }
 
   // 6. Controlled Group Contact Details
-  public async getGroupContactsForRoll(rawRoll: string): Promise<{
+  public async getGroupContactsForRoll(rawRoll: string, targetEventId?: string): Promise<{
     success: boolean;
     error?: string;
     subtext?: string;
@@ -1038,15 +1586,18 @@ class Database {
       return { success: false, error: 'Invalid roll number.' };
     }
 
+    const targetEvent = targetEventId
+      ? ((await this.getEventById(targetEventId)) || (await this.getActiveEvent()))
+      : await this.getActiveEvent();
+
     if (isPostgresConfigured()) {
-      const eventRes = await query(`SELECT is_published FROM event_state WHERE id = 1;`);
-      if (!eventRes.rows[0]?.is_published) {
+      if (!targetEvent.isPublished) {
         return { success: false, error: 'Groups have not been published yet.' };
       }
 
       const regRes = await query(
-        `SELECT group_id FROM registrations WHERE roll_number = $1 LIMIT 1;`,
-        [validation.normalizedRoll]
+        `SELECT group_id FROM registrations WHERE roll_number = $1 AND (event_id = $2 OR event_id IS NULL) LIMIT 1;`,
+        [validation.normalizedRoll, targetEvent.id]
       );
       const groupId = regRes.rows[0]?.group_id;
       if (!groupId) {
@@ -1077,11 +1628,13 @@ class Database {
     }
 
     // In-memory fallback
-    if (!this.inMemoryData.event.isPublished) {
+    if (!targetEvent.isPublished) {
       return { success: false, error: 'Groups have not been published yet.' };
     }
 
-    const reg = this.inMemoryData.registrations.find(r => r.rollNumber === validation.normalizedRoll);
+    const reg = this.inMemoryData.registrations.find(
+      r => r.rollNumber === validation.normalizedRoll && (!r.eventId || r.eventId === targetEvent.id)
+    );
     if (!reg || !reg.groupId) {
       return { success: false, error: 'Could not find your group.' };
     }
@@ -1109,20 +1662,29 @@ class Database {
   }
 
   // 7. Duplicate Check & Review
-  public async runDuplicateCheck(): Promise<{
+  public async runDuplicateCheck(targetEventId?: string): Promise<{
     totalRegistrations: number;
     uniqueParticipants: number;
     duplicateCount: number;
     issues: DuplicateIssue[];
     readyToMix: boolean;
   }> {
+    const targetEvent = targetEventId
+      ? ((await this.getEventById(targetEventId)) || (await this.getActiveEvent()))
+      : await this.getActiveEvent();
+
     let allRegistrations: Registration[] = [];
 
     if (isPostgresConfigured()) {
-      const res = await query(`SELECT * FROM registrations ORDER BY registered_at ASC;`);
+      const res = await query(
+        `SELECT * FROM registrations WHERE event_id = $1 OR event_id IS NULL ORDER BY registered_at ASC;`,
+        [targetEvent.id]
+      );
       allRegistrations = res.rows.map(mapRowToRegistration);
     } else {
-      allRegistrations = [...this.inMemoryData.registrations];
+      allRegistrations = this.inMemoryData.registrations.filter(
+        r => !r.eventId || r.eventId === targetEvent.id
+      );
     }
 
     const rollMap: Record<string, Registration[]> = {};
@@ -1177,18 +1739,22 @@ class Database {
   // 8. Resolve Duplicate
   public async resolveDuplicate(
     rollNumber: string,
-    choice: 'first' | 'latest' | string
+    choice: 'first' | 'latest' | string,
+    targetEventId?: string
   ): Promise<{
     success: boolean;
     rollNumber: string;
     chosenId: string;
   }> {
     const normalizedRoll = this.normalizeRollNumber(rollNumber);
+    const targetEvent = targetEventId
+      ? ((await this.getEventById(targetEventId)) || (await this.getActiveEvent()))
+      : await this.getActiveEvent();
 
     if (isPostgresConfigured()) {
       const res = await query(
-        `SELECT * FROM registrations WHERE roll_number = $1 ORDER BY registered_at ASC;`,
-        [normalizedRoll]
+        `SELECT * FROM registrations WHERE roll_number = $1 AND (event_id = $2 OR event_id IS NULL) ORDER BY registered_at ASC;`,
+        [normalizedRoll, targetEvent.id]
       );
       const matches = res.rows.map(mapRowToRegistration);
 
@@ -1234,7 +1800,7 @@ class Database {
 
     // In-memory fallback
     const matches = this.inMemoryData.registrations
-      .filter(r => r.rollNumber === normalizedRoll)
+      .filter(r => r.rollNumber === normalizedRoll && (!r.eventId || r.eventId === targetEvent.id))
       .sort((a, b) => a.registeredAt - b.registeredAt);
 
     if (matches.length <= 1) {
@@ -1264,14 +1830,19 @@ class Database {
     return { success: true, rollNumber: normalizedRoll, chosenId: chosen.id };
   }
 
-  // 9. Mix Match (Group Generation)
-  public async mixMatch(): Promise<{
+  // 9. Mix Match (Group Generation with Recurring Group Avoidance)
+  public async mixMatch(targetEventId?: string): Promise<{
     success: boolean;
     error?: string;
     totalParticipants: number;
     groupsCount: number;
+    eventId?: string;
   }> {
-    const dupCheck = await this.runDuplicateCheck();
+    const targetEvent = targetEventId
+      ? ((await this.getEventById(targetEventId)) || (await this.getActiveEvent()))
+      : await this.getActiveEvent();
+
+    const dupCheck = await this.runDuplicateCheck(targetEvent.id);
     const unresolved = dupCheck.issues.filter(i => !i.resolved);
     if (unresolved.length > 0) {
       return {
@@ -1279,16 +1850,20 @@ class Database {
         error: `Cannot mix groups: ${unresolved.length} unresolved duplicate roll numbers exist. Please resolve them first.`,
         totalParticipants: 0,
         groupsCount: 0,
+        eventId: targetEvent.id,
       };
     }
 
     let activeParticipants: Registration[] = [];
     if (isPostgresConfigured()) {
-      const res = await query(`SELECT * FROM registrations WHERE status IN ('active', 'valid');`);
+      const res = await query(
+        `SELECT * FROM registrations WHERE (event_id = $1 OR event_id IS NULL) AND status IN ('active', 'valid') ORDER BY registered_at ASC;`,
+        [targetEvent.id]
+      );
       activeParticipants = res.rows.map(mapRowToRegistration);
     } else {
       activeParticipants = this.inMemoryData.registrations.filter(
-        r => r.status === 'active' || r.status === 'valid'
+        r => (!r.eventId || r.eventId === targetEvent.id) && (r.status === 'active' || r.status === 'valid')
       );
     }
 
@@ -1299,7 +1874,81 @@ class Database {
         error: `Need at least 3 active participants to create a group. Currently have ${N}.`,
         totalParticipants: N,
         groupsCount: 0,
+        eventId: targetEvent.id,
       };
+    }
+
+    // --- RECURRING GROUP LOGIC ---
+    // Track historical pair frequencies and exact triplets across prior events
+    const pastPairCounts = new Map<string, number>();
+    const pastTriplets = new Set<string>();
+
+    if (isPostgresConfigured()) {
+      const pastGroupsRes = await query(`
+        SELECT g.id, g.event_id,
+          COALESCE(
+            json_agg(r.roll_number) FILTER (WHERE r.roll_number IS NOT NULL AND r.status != 'withdrawn'),
+            '[]'
+          ) as rolls
+        FROM groups g
+        JOIN group_members gm ON g.id = gm.group_id
+        JOIN registrations r ON gm.registration_id = r.id
+        LEFT JOIN events e ON g.event_id = e.id
+        WHERE g.event_id IS NOT NULL 
+          AND g.event_id != $1 
+          AND (e.is_published = true OR e.status = 'completed' OR e.id IS NULL)
+        GROUP BY g.id, g.event_id;
+      `, [targetEvent.id]);
+
+      for (const row of pastGroupsRes.rows) {
+        const rolls: string[] = Array.isArray(row.rolls) ? [...row.rolls].sort() : [];
+        // Triplets
+        for (let i = 0; i < rolls.length; i++) {
+          for (let j = i + 1; j < rolls.length; j++) {
+            for (let k = j + 1; k < rolls.length; k++) {
+              pastTriplets.add(`${rolls[i]}_${rolls[j]}_${rolls[k]}`);
+            }
+          }
+        }
+        // Pairs
+        for (let i = 0; i < rolls.length; i++) {
+          for (let j = i + 1; j < rolls.length; j++) {
+            const pairKey = `${rolls[i]}_${rolls[j]}`;
+            pastPairCounts.set(pairKey, (pastPairCounts.get(pairKey) || 0) + 1);
+          }
+        }
+      }
+    } else {
+      const pastGroups = this.inMemoryData.groups.filter(g => {
+        if (!g.eventId || g.eventId === targetEvent.id) return false;
+        const evt = this.inMemoryData.events.find(e => e.id === g.eventId);
+        return evt ? (evt.isPublished || evt.status === 'completed') : true;
+      });
+      for (const g of pastGroups) {
+        const rolls = g.memberIds
+          .map(mId => {
+            const r = this.inMemoryData.registrations.find(reg => reg.id === mId);
+            return r && r.status !== 'withdrawn' ? r.rollNumber : null;
+          })
+          .filter(Boolean) as string[];
+        rolls.sort();
+
+        // Triplets
+        for (let i = 0; i < rolls.length; i++) {
+          for (let j = i + 1; j < rolls.length; j++) {
+            for (let k = j + 1; k < rolls.length; k++) {
+              pastTriplets.add(`${rolls[i]}_${rolls[j]}_${rolls[k]}`);
+            }
+          }
+        }
+        // Pairs
+        for (let i = 0; i < rolls.length; i++) {
+          for (let j = i + 1; j < rolls.length; j++) {
+            const pairKey = `${rolls[i]}_${rolls[j]}`;
+            pastPairCounts.set(pairKey, (pastPairCounts.get(pairKey) || 0) + 1);
+          }
+        }
+      }
     }
 
     const participants = [...activeParticipants];
@@ -1321,77 +1970,179 @@ class Database {
       groupSizes.push(2);
     }
 
-    // Shuffle
-    for (let i = participants.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [participants[i], participants[j]] = [participants[j], participants[i]];
-    }
+    const uniqueBatches = new Set(activeParticipants.map(p => p.batch)).size;
 
-    // Partition
-    let curIdx = 0;
-    const initialGroups: Registration[][] = [];
-    for (const size of groupSizes) {
-      initialGroups.push(participants.slice(curIdx, curIdx + size));
-      curIdx += size;
-    }
-
-    // Batch diversity optimization scoring
+    // Batch diversity + Recurring Group Avoidance optimization scoring
     const calcGroupPenalty = (grp: Registration[]): number => {
-      const counts: Record<string, number> = {};
-      for (const p of grp) {
-        counts[p.batch] = (counts[p.batch] || 0) + 1;
-      }
       let penalty = 0;
-      for (const b in counts) {
-        const c = counts[b];
-        if (c >= 3) {
-          penalty += 100;
-        } else if (c === 2) {
-          penalty += 5;
+
+      // 1. Batch diversity penalty
+      if (uniqueBatches > 1) {
+        const counts: Record<string, number> = {};
+        for (const p of grp) {
+          counts[p.batch] = (counts[p.batch] || 0) + 1;
+        }
+        for (const b in counts) {
+          const c = counts[b];
+          if (c >= 3) {
+            penalty += 100;
+          } else if (c === 2) {
+            penalty += 15;
+          }
         }
       }
+
+      const sortedRolls = grp.map(p => p.rollNumber).sort();
+
+      // 2. Exact group repetition penalty (avoid A + B + C repeating)
+      for (let i = 0; i < sortedRolls.length; i++) {
+        for (let j = i + 1; j < sortedRolls.length; j++) {
+          for (let k = j + 1; k < sortedRolls.length; k++) {
+            const tripletKey = `${sortedRolls[i]}_${sortedRolls[j]}_${sortedRolls[k]}`;
+            if (pastTriplets.has(tripletKey)) {
+              penalty += 50000;
+            }
+          }
+        }
+      }
+
+      // 3. Repeated pair penalty (Convex penalty to maximize new connections)
+      for (let i = 0; i < sortedRolls.length; i++) {
+        for (let j = i + 1; j < sortedRolls.length; j++) {
+          const pairKey = `${sortedRolls[i]}_${sortedRolls[j]}`;
+          const timesMet = pastPairCounts.get(pairKey) || 0;
+          if (timesMet === 1) {
+            penalty += 1500;
+          } else if (timesMet === 2) {
+            penalty += 8000;
+          } else if (timesMet >= 3) {
+            penalty += 25000 * timesMet;
+          }
+        }
+      }
+
       return penalty;
     };
 
-    const numGroups = initialGroups.length;
-    if (numGroups > 1) {
-      for (let iter = 0; iter < 3000; iter++) {
-        const g1Idx = Math.floor(Math.random() * numGroups);
-        let g2Idx = Math.floor(Math.random() * numGroups);
+    const calcTotalPenalty = (groups: Registration[][]): number => {
+      return groups.reduce((sum, g) => sum + calcGroupPenalty(g), 0);
+    };
+
+    // Multi-start Simulated Annealing with 3-way rotation
+    let bestGroups: Registration[][] = [];
+    let bestScore = Infinity;
+
+    const numRestarts = 3;
+    const maxIters = 6000;
+
+    for (let restart = 0; restart < numRestarts; restart++) {
+      // Random shuffle
+      const pool = [...activeParticipants];
+      for (let i = pool.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [pool[i], pool[j]] = [pool[j], pool[i]];
+      }
+
+      // Partition
+      let curIdx = 0;
+      const curGroups: Registration[][] = [];
+      for (const size of groupSizes) {
+        curGroups.push(pool.slice(curIdx, curIdx + size));
+        curIdx += size;
+      }
+
+      const numG = curGroups.length;
+      if (numG <= 1) {
+        bestGroups = curGroups;
+        break;
+      }
+
+      let currentScore = calcTotalPenalty(curGroups);
+      let temp = 120.0;
+      const cooling = 0.9992;
+
+      for (let iter = 0; iter < maxIters; iter++) {
+        temp *= cooling;
+
+        // Try 2-opt swap between two distinct groups
+        const g1Idx = Math.floor(Math.random() * numG);
+        let g2Idx = Math.floor(Math.random() * numG);
         while (g2Idx === g1Idx) {
-          g2Idx = Math.floor(Math.random() * numGroups);
+          g2Idx = Math.floor(Math.random() * numG);
         }
 
-        const g1 = initialGroups[g1Idx];
-        const g2 = initialGroups[g2Idx];
+        const g1 = curGroups[g1Idx];
+        const g2 = curGroups[g2Idx];
         const m1Idx = Math.floor(Math.random() * g1.length);
         const m2Idx = Math.floor(Math.random() * g2.length);
 
-        const oldPen = calcGroupPenalty(g1) + calcGroupPenalty(g2);
+        const oldSubPen = calcGroupPenalty(g1) + calcGroupPenalty(g2);
 
-        const t1 = g1[m1Idx];
-        const t2 = g2[m2Idx];
-        g1[m1Idx] = t2;
-        g2[m2Idx] = t1;
+        const p1 = g1[m1Idx];
+        const p2 = g2[m2Idx];
+        g1[m1Idx] = p2;
+        g2[m2Idx] = p1;
 
-        const newPen = calcGroupPenalty(g1) + calcGroupPenalty(g2);
-        const delta = newPen - oldPen;
+        const newSubPen = calcGroupPenalty(g1) + calcGroupPenalty(g2);
+        const delta = newSubPen - oldSubPen;
 
-        if (delta < 0 || (delta === 0 && Math.random() < 0.15)) {
-          // keep swap
+        if (delta < 0 || Math.random() < Math.exp(-delta / Math.max(temp, 0.001))) {
+          currentScore += delta;
         } else {
-          g1[m1Idx] = t1;
-          g2[m2Idx] = t2;
+          // Revert swap
+          g1[m1Idx] = p1;
+          g2[m2Idx] = p2;
         }
+
+        // 3-way cyclic rotation every 10 iterations if at least 3 groups exist
+        if (numG >= 3 && iter % 10 === 0) {
+          const idxs = [0, 1, 2].map(() => Math.floor(Math.random() * numG));
+          if (idxs[0] !== idxs[1] && idxs[1] !== idxs[2] && idxs[0] !== idxs[2]) {
+            const [ga, gb, gc] = [curGroups[idxs[0]], curGroups[idxs[1]], curGroups[idxs[2]]];
+            const [ma, mb, mc] = [
+              Math.floor(Math.random() * ga.length),
+              Math.floor(Math.random() * gb.length),
+              Math.floor(Math.random() * gc.length),
+            ];
+
+            const old3 = calcGroupPenalty(ga) + calcGroupPenalty(gb) + calcGroupPenalty(gc);
+
+            const [ta, tb, tc] = [ga[ma], gb[mb], gc[mc]];
+            ga[ma] = tc;
+            gb[mb] = ta;
+            gc[mc] = tb;
+
+            const new3 = calcGroupPenalty(ga) + calcGroupPenalty(gb) + calcGroupPenalty(gc);
+            const delta3 = new3 - old3;
+
+            if (delta3 < 0 || Math.random() < Math.exp(-delta3 / Math.max(temp, 0.001))) {
+              currentScore += delta3;
+            } else {
+              ga[ma] = ta;
+              gb[mb] = tb;
+              gc[mc] = tc;
+            }
+          }
+        }
+
+        if (currentScore === 0) break;
+      }
+
+      if (currentScore < bestScore) {
+        bestScore = currentScore;
+        bestGroups = curGroups.map(g => [...g]);
+        if (bestScore === 0) break;
       }
     }
+
+    const finalGroups = bestGroups;
 
     // Format new groups
     const newGroups: Group[] = [];
     const assignedIdsMap: Record<string, string> = {};
     const now = Date.now();
 
-    initialGroups.forEach((grp, idx) => {
+    finalGroups.forEach((grp, idx) => {
       const padNum = (idx + 1).toString().padStart(2, '0');
       const groupId = `grp_${now}_${padNum}`;
       const memberIds = grp.map(p => p.id);
@@ -1402,6 +2153,7 @@ class Database {
         memberIds,
         createdAt: now,
         locked: false,
+        eventId: targetEvent.id,
       });
 
       grp.forEach(p => {
@@ -1414,15 +2166,21 @@ class Database {
       try {
         await client.query('BEGIN');
 
-        // Delete old group associations
-        await client.query('DELETE FROM group_members;');
-        await client.query('DELETE FROM groups;');
+        // Delete old group associations for this event ONLY
+        await client.query(
+          `DELETE FROM group_members WHERE group_id IN (SELECT id FROM groups WHERE event_id = $1);`,
+          [targetEvent.id]
+        );
+        await client.query(
+          `DELETE FROM groups WHERE event_id = $1;`,
+          [targetEvent.id]
+        );
 
         // Insert new groups & members
         for (const g of newGroups) {
           await client.query(
-            `INSERT INTO groups (id, name, created_at, locked) VALUES ($1, $2, $3, $4);`,
-            [g.id, g.name, g.createdAt, g.locked]
+            `INSERT INTO groups (id, name, created_at, locked, event_id) VALUES ($1, $2, $3, $4, $5);`,
+            [g.id, g.name, g.createdAt, g.locked, targetEvent.id]
           );
 
           for (const mId of g.memberIds) {
@@ -1431,33 +2189,48 @@ class Database {
               [g.id, mId]
             );
             await client.query(
-              `UPDATE registrations SET group_id = $1, group_assigned = true, updated_at = $2 WHERE id = $3;`,
-              [g.id, now, mId]
+              `UPDATE registrations SET group_id = $1, group_assigned = true, updated_at = $2, event_id = $3 WHERE id = $4;`,
+              [g.id, now, targetEvent.id, mId]
             );
           }
         }
 
-        // Clear group assignment on non-active
+        // Clear group assignment on non-active for this event
         await client.query(
-          `UPDATE registrations SET group_id = NULL, group_assigned = false WHERE status NOT IN ('active', 'valid');`
+          `UPDATE registrations SET group_id = NULL, group_assigned = false WHERE (event_id = $1 OR event_id IS NULL) AND status NOT IN ('active', 'valid');`,
+          [targetEvent.id]
         );
 
-        // Update event state
-        await client.query(
-          `UPDATE event_state SET
+        // Update event record
+        await query(
+          `UPDATE events SET
              stage = 'MIXED',
              groups_locked = false,
              is_published = false,
-             last_mixed_at = $1
-           WHERE id = 1;`,
-          [now]
+             last_mixed_at = $1,
+             updated_at = $1
+           WHERE id = $2;`,
+          [now, targetEvent.id]
         );
+
+        if (this.currentActiveEventId === targetEvent.id) {
+          await client.query(
+            `UPDATE event_state SET
+               stage = 'MIXED',
+               groups_locked = false,
+               is_published = false,
+               last_mixed_at = $1
+             WHERE id = 1;`,
+            [now]
+          );
+        }
 
         await client.query('COMMIT');
         return {
           success: true,
           totalParticipants: participants.length,
           groupsCount: newGroups.length,
+          eventId: targetEvent.id,
         };
       } catch (err) {
         await client.query('ROLLBACK');
@@ -1469,100 +2242,155 @@ class Database {
 
     // In-memory fallback
     for (const r of this.inMemoryData.registrations) {
-      if (r.status === 'active' || r.status === 'valid') {
+      if ((!r.eventId || r.eventId === targetEvent.id) && (r.status === 'active' || r.status === 'valid')) {
         r.groupId = assignedIdsMap[r.id] || null;
         r.groupAssigned = Boolean(r.groupId);
-      } else {
+        r.eventId = targetEvent.id;
+      } else if (!r.eventId || r.eventId === targetEvent.id) {
         r.groupId = null;
         r.groupAssigned = false;
       }
       r.updatedAt = now;
     }
 
-    this.inMemoryData.groups = newGroups;
-    this.inMemoryData.lastMixedAt = now;
-    this.inMemoryData.event.stage = 'MIXED';
-    this.inMemoryData.event.groupsLocked = false;
-    this.inMemoryData.event.isPublished = false;
+    this.inMemoryData.groups = [
+      ...this.inMemoryData.groups.filter(g => g.eventId && g.eventId !== targetEvent.id),
+      ...newGroups,
+    ];
+    targetEvent.lastMixedAt = now;
+    targetEvent.stage = 'MIXED';
+    targetEvent.groupsLocked = false;
+    targetEvent.isPublished = false;
+
+    const inMemEvt = this.inMemoryData.events.find(e => e.id === targetEvent.id);
+    if (inMemEvt) {
+      inMemEvt.lastMixedAt = now;
+      inMemEvt.stage = 'MIXED';
+      inMemEvt.groupsLocked = false;
+      inMemEvt.isPublished = false;
+      inMemEvt.updatedAt = now;
+    }
+
+    if (this.currentActiveEventId === targetEvent.id) {
+      this.inMemoryData.lastMixedAt = now;
+      this.inMemoryData.event.stage = 'MIXED';
+      this.inMemoryData.event.groupsLocked = false;
+      this.inMemoryData.event.isPublished = false;
+    }
 
     return {
       success: true,
       totalParticipants: participants.length,
       groupsCount: newGroups.length,
+      eventId: targetEvent.id,
     };
   }
 
   // 10. Lock Groups
-  public async lockGroups(): Promise<{ success: boolean; groupsCount: number }> {
+  public async lockGroups(targetEventId?: string): Promise<{ success: boolean; groupsCount: number; eventId?: string }> {
+    const targetEvent = targetEventId
+      ? ((await this.getEventById(targetEventId)) || (await this.getActiveEvent()))
+      : await this.getActiveEvent();
+
     if (isPostgresConfigured()) {
-      await query(`UPDATE event_state SET stage = 'GROUPS_LOCKED', groups_locked = true WHERE id = 1;`);
-      await query(`UPDATE groups SET locked = true;`);
-      const countRes = await query(`SELECT COUNT(*)::int as count FROM groups;`);
-      return { success: true, groupsCount: countRes.rows[0]?.count || 0 };
+      await query(
+        `UPDATE events SET stage = 'GROUPS_LOCKED', groups_locked = true, updated_at = $1 WHERE id = $2;`,
+        [Date.now(), targetEvent.id]
+      );
+      await query(`UPDATE groups SET locked = true WHERE event_id = $1 OR event_id IS NULL;`, [targetEvent.id]);
+      if (this.currentActiveEventId === targetEvent.id) {
+        await query(`UPDATE event_state SET stage = 'GROUPS_LOCKED', groups_locked = true WHERE id = 1;`);
+      }
+      const countRes = await query(`SELECT COUNT(*)::int as count FROM groups WHERE event_id = $1 OR event_id IS NULL;`, [targetEvent.id]);
+      return { success: true, groupsCount: countRes.rows[0]?.count || 0, eventId: targetEvent.id };
     }
 
-    this.inMemoryData.event.groupsLocked = true;
-    this.inMemoryData.event.stage = 'GROUPS_LOCKED';
-    for (const g of this.inMemoryData.groups) {
-      g.locked = true;
+    targetEvent.groupsLocked = true;
+    targetEvent.stage = 'GROUPS_LOCKED';
+    const inMemEvtLock = this.inMemoryData.events.find(e => e.id === targetEvent.id);
+    if (inMemEvtLock) {
+      inMemEvtLock.groupsLocked = true;
+      inMemEvtLock.stage = 'GROUPS_LOCKED';
+      inMemEvtLock.updatedAt = Date.now();
     }
-    return { success: true, groupsCount: this.inMemoryData.groups.length };
+
+    for (const g of this.inMemoryData.groups) {
+      if (!g.eventId || g.eventId === targetEvent.id) {
+        g.locked = true;
+      }
+    }
+    if (this.currentActiveEventId === targetEvent.id) {
+      this.inMemoryData.event.groupsLocked = true;
+      this.inMemoryData.event.stage = 'GROUPS_LOCKED';
+    }
+    const count = this.inMemoryData.groups.filter(g => !g.eventId || g.eventId === targetEvent.id).length;
+    return { success: true, groupsCount: count, eventId: targetEvent.id };
   }
 
   // 11. Final Integrity Check
-  public async runFinalIntegrityCheck(): Promise<IntegrityCheckResult> {
-    const issues: string[] = [];
+  public async runFinalIntegrityCheck(targetEventId?: string): Promise<IntegrityCheckResult> {
+    const targetEvent = targetEventId
+      ? ((await this.getEventById(targetEventId)) || (await this.getActiveEvent()))
+      : await this.getActiveEvent();
 
+    const issues: string[] = [];
     let allRegistrations: Registration[] = [];
     let allGroups: Group[] = [];
-    let eventState: EventState;
-    let lastMixedAt: number | null = null;
+    let eventStage = targetEvent.stage;
+    let groupsLocked = targetEvent.groupsLocked;
+    let lastMixedAt: number | null = targetEvent.lastMixedAt;
 
     if (isPostgresConfigured()) {
-      const regRes = await query(`SELECT * FROM registrations ORDER BY registered_at ASC;`);
+      const regRes = await query(
+        `SELECT * FROM registrations WHERE event_id = $1 OR event_id IS NULL ORDER BY registered_at ASC;`,
+        [targetEvent.id]
+      );
       allRegistrations = regRes.rows.map(mapRowToRegistration);
 
       const groupRes = await query(`
-        SELECT g.id, g.name, g.created_at, g.locked,
+        SELECT g.id, g.name, g.created_at, g.locked, g.event_id,
           COALESCE(
             json_agg(gm.registration_id) FILTER (WHERE gm.registration_id IS NOT NULL),
             '[]'
           ) as member_ids
         FROM groups g
         LEFT JOIN group_members gm ON g.id = gm.group_id
-        GROUP BY g.id, g.name, g.created_at, g.locked
+        WHERE g.event_id = $1 OR g.event_id IS NULL
+        GROUP BY g.id, g.name, g.created_at, g.locked, g.event_id
         ORDER BY g.name ASC;
-      `);
+      `, [targetEvent.id]);
       allGroups = groupRes.rows.map(row => ({
         id: row.id,
         name: row.name,
         createdAt: Number(row.created_at),
         locked: Boolean(row.locked),
         memberIds: row.member_ids || [],
+        eventId: row.event_id,
       }));
-
-      const eventRes = await query(`SELECT * FROM event_state WHERE id = 1;`);
-      const eventRow = eventRes.rows[0];
-      eventState = {
-        stage: eventRow?.stage || 'REGISTRATION_OPEN',
-        revealTime: eventRow?.reveal_time || getNextFriday3PMIST().toISOString(),
-        registrationOpen: Boolean(eventRow?.registration_open),
-        groupsLocked: Boolean(eventRow?.groups_locked),
-        isPublished: Boolean(eventRow?.is_published),
-        publishedAt: eventRow?.published_at ? Number(eventRow.published_at) : null,
-      };
-      lastMixedAt = eventRow?.last_mixed_at ? Number(eventRow.last_mixed_at) : null;
     } else {
-      allRegistrations = this.inMemoryData.registrations;
-      allGroups = this.inMemoryData.groups;
-      eventState = this.inMemoryData.event;
-      lastMixedAt = this.inMemoryData.lastMixedAt;
+      allRegistrations = this.inMemoryData.registrations.filter(r => !r.eventId || r.eventId === targetEvent.id);
+      allGroups = this.inMemoryData.groups.filter(g => !g.eventId || g.eventId === targetEvent.id);
     }
 
     const activeRegistrations = allRegistrations.filter(r => r.status === 'active' || r.status === 'valid');
     const withdrawnRegistrations = allRegistrations.filter(r => r.status === 'withdrawn');
 
-    // 1. Duplicate roll numbers among active participants
+    // 1. Withdrawn participants checks
+    for (const w of withdrawnRegistrations) {
+      if (w.groupId) {
+        issues.push(`Withdrawn participant ${w.rollNumber} still has a group assigned.`);
+      }
+    }
+    for (const g of allGroups) {
+      for (const mId of g.memberIds) {
+        const reg = allRegistrations.find(r => r.id === mId);
+        if (reg && reg.status === 'withdrawn') {
+          issues.push(`Withdrawn participant ${reg.rollNumber} is present in group ${g.name}.`);
+        }
+      }
+    }
+
+    // 2. Duplicate roll numbers among active participants
     const rollCounts: Record<string, number> = {};
     for (const v of activeRegistrations) {
       rollCounts[v.rollNumber] = (rollCounts[v.rollNumber] || 0) + 1;
@@ -1573,18 +2401,21 @@ class Database {
       }
     }
 
-    // 2. Unresolved duplicate entries
+    // 3. Unresolved duplicate entries
     const unresolvedDuplicates = allRegistrations.filter(
       r => r.status === 'duplicate' && !r.flagReason?.includes('Superseded')
     );
+    if (unresolvedDuplicates.length > 0) {
+      issues.push(`${unresolvedDuplicates.length} unresolved duplicate registration(s) detected. Please resolve them first.`);
+    }
 
-    // 3. Unassigned participants
+    // 4. Unassigned active participants
     const unassigned = activeRegistrations.filter(r => !r.groupId);
     if (unassigned.length > 0) {
       issues.push(`${unassigned.length} active participant(s) are unassigned.`);
     }
 
-    // 4. Any participant in multiple groups
+    // 5. Any participant in multiple groups
     const memberGroupCounts: Record<string, number> = {};
     for (const g of allGroups) {
       for (const mId of g.memberIds) {
@@ -1599,14 +2430,17 @@ class Database {
       }
     }
 
-    // 5. Check if any group has fewer than 2 active members
+    // 6. Group count and member count validation
+    if (allGroups.length === 0) {
+      issues.push("No groups have been created yet. Run Mix Match first.");
+    }
     for (const g of allGroups) {
-      if (g.memberIds.length < 2) {
-        issues.push(`${g.name} has fewer than 2 members.`);
+      if (g.memberIds.length < 2 || g.memberIds.length > 4) {
+        issues.push(`${g.name} has invalid member count (${g.memberIds.length} members). Valid groups have 2-4 members.`);
       }
     }
 
-    // 6. Check if groups need remix because someone withdrew after matching
+    // 7. Check if groups need remix because someone withdrew after matching
     const withdrawnAfterMatch = allRegistrations.filter(
       r =>
         r.status === 'withdrawn' &&
@@ -1617,17 +2451,27 @@ class Database {
       issues.push(`${withdrawnAfterMatch.length} participant(s) withdrew after matching. Groups must be remixed.`);
     }
 
-    // 7. Whether all groups are locked
-    if (!eventState.groupsLocked) {
+    // 8. Whether all groups are locked
+    if (!groupsLocked) {
       issues.push("Groups are not locked yet. Click 'Lock Groups' before publishing.");
+    }
+    const unlockedGroups = allGroups.filter(g => !g.locked);
+    if (unlockedGroups.length > 0 && groupsLocked) {
+      issues.push(`${unlockedGroups.length} group(s) are not locked.`);
     }
 
     const passed = issues.length === 0;
-    if (passed && eventState.stage === 'GROUPS_LOCKED') {
+    if (passed && eventStage === 'GROUPS_LOCKED') {
       if (isPostgresConfigured()) {
-        await query(`UPDATE event_state SET stage = 'READY_TO_PUBLISH' WHERE id = 1;`);
+        await query(`UPDATE events SET stage = 'READY_TO_PUBLISH' WHERE id = $1;`, [targetEvent.id]);
+        if (this.currentActiveEventId === targetEvent.id) {
+          await query(`UPDATE event_state SET stage = 'READY_TO_PUBLISH' WHERE id = 1;`);
+        }
       } else {
-        this.inMemoryData.event.stage = 'READY_TO_PUBLISH';
+        targetEvent.stage = 'READY_TO_PUBLISH';
+        if (this.currentActiveEventId === targetEvent.id) {
+          this.inMemoryData.event.stage = 'READY_TO_PUBLISH';
+        }
       }
     }
 
@@ -1649,113 +2493,162 @@ class Database {
   }
 
   // 12. Publish Final List
-  public async publishFinalList(): Promise<{ success: boolean; error?: string; publishedAt: number | null }> {
-    const check = await this.runFinalIntegrityCheck();
+  public async publishFinalList(targetEventId?: string): Promise<{ success: boolean; error?: string; publishedAt: number | null; eventId?: string }> {
+    const targetEvent = targetEventId
+      ? ((await this.getEventById(targetEventId)) || (await this.getActiveEvent()))
+      : await this.getActiveEvent();
+
+    const check = await this.runFinalIntegrityCheck(targetEvent.id);
     if (!check.passed) {
       return {
         success: false,
         error: `Cannot publish yet. ${check.issues.length} issues found: ${check.issues.join('; ')}`,
         publishedAt: null,
+        eventId: targetEvent.id,
       };
     }
 
     const now = Date.now();
     if (isPostgresConfigured()) {
       await query(
-        `UPDATE event_state SET
+        `UPDATE events SET
            is_published = true,
            published_at = $1,
-           stage = 'PUBLISHED'
-         WHERE id = 1;`,
-        [now]
+           stage = 'PUBLISHED',
+           status = 'completed',
+           updated_at = $1
+         WHERE id = $2;`,
+        [now, targetEvent.id]
       );
-      return { success: true, publishedAt: now };
+      if (this.currentActiveEventId === targetEvent.id) {
+        await query(
+          `UPDATE event_state SET
+             is_published = true,
+             published_at = $1,
+             stage = 'PUBLISHED'
+           WHERE id = 1;`,
+          [now]
+        );
+      }
+      return { success: true, publishedAt: now, eventId: targetEvent.id };
     }
 
-    this.inMemoryData.event.isPublished = true;
-    this.inMemoryData.event.publishedAt = now;
-    this.inMemoryData.event.stage = 'PUBLISHED';
+    targetEvent.isPublished = true;
+    targetEvent.publishedAt = now;
+    targetEvent.stage = 'PUBLISHED';
+    targetEvent.status = 'completed';
+
+    const inMemEvtPub = this.inMemoryData.events.find(e => e.id === targetEvent.id);
+    if (inMemEvtPub) {
+      inMemEvtPub.isPublished = true;
+      inMemEvtPub.publishedAt = now;
+      inMemEvtPub.stage = 'PUBLISHED';
+      inMemEvtPub.status = 'completed';
+      inMemEvtPub.updatedAt = now;
+    }
+
+    if (this.currentActiveEventId === targetEvent.id) {
+      this.inMemoryData.event.isPublished = true;
+      this.inMemoryData.event.publishedAt = now;
+      this.inMemoryData.event.stage = 'PUBLISHED';
+    }
 
     return {
       success: true,
       publishedAt: now,
+      eventId: targetEvent.id,
     };
   }
 
   // Admin registration toggle
-  public async toggleRegistration(isOpen: boolean): Promise<boolean> {
-    if (isPostgresConfigured()) {
-      const eventRes = await query(`SELECT stage FROM event_state WHERE id = 1;`);
-      let nextStage = eventRes.rows[0]?.stage || 'REGISTRATION_OPEN';
+  public async toggleRegistration(isOpen: boolean, targetEventId?: string): Promise<boolean> {
+    const targetEvent = targetEventId
+      ? ((await this.getEventById(targetEventId)) || (await this.getActiveEvent()))
+      : await this.getActiveEvent();
 
+    if (isPostgresConfigured()) {
+      let nextStage = targetEvent.stage || 'REGISTRATION_OPEN';
       if (!isOpen && nextStage === 'REGISTRATION_OPEN') {
         nextStage = 'REGISTRATION_CLOSED';
       } else if (isOpen && nextStage === 'REGISTRATION_CLOSED') {
         nextStage = 'REGISTRATION_OPEN';
       }
 
-      await query(`UPDATE event_state SET registration_open = $1, stage = $2 WHERE id = 1;`, [
-        isOpen,
-        nextStage,
-      ]);
+      await query(
+        `UPDATE events SET registration_open = $1, stage = $2, updated_at = $3 WHERE id = $4;`,
+        [isOpen, nextStage, Date.now(), targetEvent.id]
+      );
+
+      if (this.currentActiveEventId === targetEvent.id) {
+        await query(`UPDATE event_state SET registration_open = $1, stage = $2 WHERE id = 1;`, [
+          isOpen,
+          nextStage,
+        ]);
+      }
       return isOpen;
     }
 
-    this.inMemoryData.event.registrationOpen = isOpen;
-    if (!isOpen && this.inMemoryData.event.stage === 'REGISTRATION_OPEN') {
-      this.inMemoryData.event.stage = 'REGISTRATION_CLOSED';
-    } else if (isOpen && this.inMemoryData.event.stage === 'REGISTRATION_CLOSED') {
-      this.inMemoryData.event.stage = 'REGISTRATION_OPEN';
+    targetEvent.registrationOpen = isOpen;
+    if (!isOpen && targetEvent.stage === 'REGISTRATION_OPEN') {
+      targetEvent.stage = 'REGISTRATION_CLOSED';
+    } else if (isOpen && targetEvent.stage === 'REGISTRATION_CLOSED') {
+      targetEvent.stage = 'REGISTRATION_OPEN';
     }
-    return this.inMemoryData.event.registrationOpen;
+
+    if (this.currentActiveEventId === targetEvent.id) {
+      this.inMemoryData.event.registrationOpen = isOpen;
+      this.inMemoryData.event.stage = targetEvent.stage;
+    }
+
+    return targetEvent.registrationOpen;
   }
 
   // Admin full data
-  public async getAdminData() {
+  public async getAdminData(targetEventId?: string) {
+    const allEvents = await this.getEvents();
+    const activeEvent = await this.getActiveEvent();
+    const currentEvent = targetEventId
+      ? (allEvents.find(e => e.id === targetEventId) || activeEvent)
+      : activeEvent;
+
     let allRegistrations: Registration[] = [];
     let allGroups: Group[] = [];
-    let eventState: EventState;
-    let lastMixedAt: number | null = null;
+    let lastMixedAt: number | null = currentEvent.lastMixedAt;
 
     if (isPostgresConfigured()) {
-      const regRes = await query(`SELECT * FROM registrations ORDER BY registered_at ASC;`);
+      const regRes = await query(
+        `SELECT * FROM registrations WHERE event_id = $1 OR event_id IS NULL ORDER BY registered_at ASC;`,
+        [currentEvent.id]
+      );
       allRegistrations = regRes.rows.map(mapRowToRegistration);
 
       const groupRes = await query(`
-        SELECT g.id, g.name, g.created_at, g.locked,
+        SELECT g.id, g.name, g.created_at, g.locked, g.event_id,
           COALESCE(
             json_agg(gm.registration_id) FILTER (WHERE gm.registration_id IS NOT NULL),
             '[]'
           ) as member_ids
         FROM groups g
         LEFT JOIN group_members gm ON g.id = gm.group_id
-        GROUP BY g.id, g.name, g.created_at, g.locked
+        WHERE g.event_id = $1 OR g.event_id IS NULL
+        GROUP BY g.id, g.name, g.created_at, g.locked, g.event_id
         ORDER BY g.name ASC;
-      `);
+      `, [currentEvent.id]);
       allGroups = groupRes.rows.map(row => ({
         id: row.id,
         name: row.name,
         createdAt: Number(row.created_at),
         locked: Boolean(row.locked),
         memberIds: row.member_ids || [],
+        eventId: row.event_id,
       }));
-
-      const eventRes = await query(`SELECT * FROM event_state WHERE id = 1;`);
-      const eventRow = eventRes.rows[0];
-      eventState = {
-        stage: eventRow?.stage || 'REGISTRATION_OPEN',
-        revealTime: eventRow?.reveal_time || getNextFriday3PMIST().toISOString(),
-        registrationOpen: Boolean(eventRow?.registration_open),
-        groupsLocked: Boolean(eventRow?.groups_locked),
-        isPublished: Boolean(eventRow?.is_published),
-        publishedAt: eventRow?.published_at ? Number(eventRow.published_at) : null,
-      };
-      lastMixedAt = eventRow?.last_mixed_at ? Number(eventRow.last_mixed_at) : null;
     } else {
-      allRegistrations = this.inMemoryData.registrations;
-      allGroups = this.inMemoryData.groups;
-      eventState = this.inMemoryData.event;
-      lastMixedAt = this.inMemoryData.lastMixedAt;
+      allRegistrations = this.inMemoryData.registrations.filter(
+        r => !r.eventId || r.eventId === currentEvent.id
+      );
+      allGroups = this.inMemoryData.groups.filter(
+        g => !g.eventId || g.eventId === currentEvent.id
+      );
     }
 
     const totalRegistrations = allRegistrations.length;
@@ -1772,14 +2665,50 @@ class Database {
         (lastMixedAt ? (r.withdrawnAt || 0) > lastMixedAt : true)
     ).length;
 
-    const needsRemix = withdrawnAfterMatchingCount > 0 && !eventState.isPublished;
+    const needsRemix = withdrawnAfterMatchingCount > 0 && !currentEvent.isPublished;
 
-    const dupCheck = await this.runDuplicateCheck();
+    const dupCheck = await this.runDuplicateCheck(currentEvent.id);
 
     const batchDistribution: Record<string, number> = {};
     for (const r of allRegistrations) {
       if (r.status === 'active' || r.status === 'valid') {
         batchDistribution[r.batch] = (batchDistribution[r.batch] || 0) + 1;
+      }
+    }
+
+    // Compute global metrics across published events for each roll number
+    const globalRegs = await this.getAllRegistrations();
+    const globalGroups = await this.getAllGroups();
+    const publishedEventIds = new Set(
+      allEvents.filter(e => e.isPublished || e.status === 'completed').map(e => e.id)
+    );
+
+    const peopleMetMap = new Map<string, Set<string>>();
+    for (const g of globalGroups) {
+      if (!g.eventId || !publishedEventIds.has(g.eventId)) continue;
+      const validRolls: string[] = [];
+      for (const mId of g.memberIds) {
+        const r = globalRegs.find(reg => reg.id === mId);
+        if (r && r.status !== 'withdrawn') {
+          validRolls.push(r.rollNumber);
+        }
+      }
+      for (let i = 0; i < validRolls.length; i++) {
+        for (let j = i + 1; j < validRolls.length; j++) {
+          const r1 = validRolls[i];
+          const r2 = validRolls[j];
+          if (!peopleMetMap.has(r1)) peopleMetMap.set(r1, new Set());
+          if (!peopleMetMap.has(r2)) peopleMetMap.set(r2, new Set());
+          peopleMetMap.get(r1)!.add(r2);
+          peopleMetMap.get(r2)!.add(r1);
+        }
+      }
+    }
+
+    const eventsJoinedMap = new Map<string, number>();
+    for (const r of globalRegs) {
+      if (r.eventId && publishedEventIds.has(r.eventId) && (r.status === 'active' || r.status === 'valid') && r.groupId) {
+        eventsJoinedMap.set(r.rollNumber, (eventsJoinedMap.get(r.rollNumber) || 0) + 1);
       }
     }
 
@@ -1811,6 +2740,9 @@ class Database {
     });
 
     return {
+      events: allEvents,
+      activeEventId: activeEvent.id,
+      selectedEventId: currentEvent.id,
       totalRegistrations,
       activeParticipants,
       withdrawnCount,
@@ -1821,12 +2753,21 @@ class Database {
       withdrawnAfterMatchingCount,
       needsRemix,
       event: {
-        stage: eventState.stage,
-        revealTime: eventState.revealTime,
-        registrationOpen: eventState.registrationOpen,
-        groupsLocked: eventState.groupsLocked,
-        isPublished: eventState.isPublished,
-        publishedAt: eventState.publishedAt,
+        id: currentEvent.id,
+        name: currentEvent.name,
+        eventDate: currentEvent.eventDate,
+        eventDay: currentEvent.eventDay,
+        eventTimeFormatted: currentEvent.eventTimeFormatted,
+        eventDisplayTitle: currentEvent.eventDisplayTitle,
+        stage: currentEvent.stage,
+        revealTime: currentEvent.revealTime,
+        registrationStart: currentEvent.registrationStart,
+        registrationEnd: currentEvent.registrationEnd,
+        registrationOpen: currentEvent.registrationOpen,
+        groupsLocked: currentEvent.groupsLocked,
+        isPublished: currentEvent.isPublished,
+        publishedAt: currentEvent.publishedAt,
+        status: currentEvent.status,
       },
       duplicateSummary: {
         duplicateCount: dupCheck.duplicateCount,
@@ -1848,6 +2789,9 @@ class Database {
         withdrawnAt: r.withdrawnAt,
         flagReason: r.flagReason,
         groupId: r.groupId,
+        eventId: r.eventId || currentEvent.id,
+        differentPeopleMet: peopleMetMap.get(r.rollNumber)?.size || 0,
+        eventsJoined: eventsJoinedMap.get(r.rollNumber) || 0,
       })),
       groups: formattedGroups,
       lastMixedAt,
@@ -1928,6 +2872,8 @@ class Database {
     this.inMemoryData = {
       registrations: seeds,
       groups: [],
+      events: this.inMemoryData?.events || [],
+      activeEventId: this.inMemoryData?.activeEventId || 'evt_2026_09_19',
       event: {
         stage: 'REGISTRATION_OPEN',
         revealTime,
@@ -1993,6 +2939,8 @@ class Database {
     this.inMemoryData = {
       registrations: [],
       groups: [],
+      events: [],
+      activeEventId: '',
       event: {
         stage: 'REGISTRATION_OPEN',
         revealTime,
@@ -2009,6 +2957,77 @@ class Database {
       totalRegistrations: 0,
       activeParticipants: 0,
     };
+  }
+
+  public async getEventRegistrations(eventId: string): Promise<Registration[]> {
+    if (isPostgresConfigured()) {
+      const res = await query(
+        `SELECT * FROM registrations WHERE event_id = $1 OR event_id IS NULL ORDER BY registered_at ASC;`,
+        [eventId]
+      );
+      return res.rows.map(mapRowToRegistration);
+    }
+    return this.inMemoryData.registrations.filter(r => !r.eventId || r.eventId === eventId);
+  }
+
+  public async getEventGroups(eventId: string): Promise<Group[]> {
+    if (isPostgresConfigured()) {
+      const res = await query(`
+        SELECT g.id, g.name, g.created_at, g.locked, g.event_id,
+          COALESCE(
+            json_agg(gm.registration_id) FILTER (WHERE gm.registration_id IS NOT NULL),
+            '[]'
+          ) as member_ids
+        FROM groups g
+        LEFT JOIN group_members gm ON g.id = gm.group_id
+        WHERE g.event_id = $1 OR g.event_id IS NULL
+        GROUP BY g.id, g.name, g.created_at, g.locked, g.event_id
+        ORDER BY g.name ASC;
+      `, [eventId]);
+      return res.rows.map(row => ({
+        id: row.id,
+        name: row.name,
+        createdAt: Number(row.created_at),
+        locked: Boolean(row.locked),
+        memberIds: row.member_ids || [],
+        eventId: row.event_id,
+      }));
+    }
+    return this.inMemoryData.groups.filter(g => !g.eventId || g.eventId === eventId);
+  }
+
+  // 14. Global Data Access across all events
+  public async getAllRegistrations(): Promise<Registration[]> {
+    if (isPostgresConfigured()) {
+      const res = await query(`SELECT * FROM registrations ORDER BY registered_at ASC;`);
+      return res.rows.map(mapRowToRegistration);
+    }
+    return [...this.inMemoryData.registrations];
+  }
+
+  public async getAllGroups(): Promise<Group[]> {
+    if (isPostgresConfigured()) {
+      const res = await query(`
+        SELECT g.id, g.name, g.created_at, g.locked, g.event_id,
+          COALESCE(
+            json_agg(gm.registration_id) FILTER (WHERE gm.registration_id IS NOT NULL),
+            '[]'
+          ) as member_ids
+        FROM groups g
+        LEFT JOIN group_members gm ON g.id = gm.group_id
+        GROUP BY g.id, g.name, g.created_at, g.locked, g.event_id
+        ORDER BY g.created_at ASC;
+      `);
+      return res.rows.map(row => ({
+        id: row.id,
+        name: row.name,
+        createdAt: Number(row.created_at),
+        locked: Boolean(row.locked),
+        memberIds: row.member_ids || [],
+        eventId: row.event_id,
+      }));
+    }
+    return [...this.inMemoryData.groups];
   }
 }
 

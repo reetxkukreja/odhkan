@@ -19,12 +19,24 @@ import {
   Phone,
   ToggleLeft,
   ToggleRight,
+  Calendar,
+  Layers,
+  Clock,
+  Sparkles,
+  UserMinus,
+  Mail,
 } from 'lucide-react';
 import {
   AdminData,
   IntegrityCheckResult,
   RegistrationItem,
+  OdhkanEventItem,
 } from '../types';
+import { AdminEventsSection } from './AdminEventsSection';
+import { AdminWithdrawalSection } from './AdminWithdrawalSection';
+import { AdminEmailSection } from './AdminEmailSection';
+import { EventHistoryModal } from './EventHistoryModal';
+import { parseISTDate } from '../utils/istDate';
 
 const INITIAL_SAFE_DATA: AdminData = {
   totalRegistrations: 0,
@@ -67,6 +79,36 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   onNavigateHome,
 }) => {
   const [data, setData] = useState<AdminData>(INITIAL_SAFE_DATA);
+  const [events, setEvents] = useState<OdhkanEventItem[]>([]);
+  const [selectedEventId, setSelectedEventId] = useState<string | undefined>(undefined);
+  const [activeEventId, setActiveEventId] = useState<string | undefined>(undefined);
+  const [activeTab, setActiveTab] = useState<'events' | 'operations' | 'withdrawals' | 'emails'>('events');
+  const [historyEventId, setHistoryEventId] = useState<string | null>(null);
+
+  // Helper for formatting withdrawal timestamp to exact IST specification
+  const formatWithdrawalIST = (ts?: number | null) => {
+    if (!ts) return '—';
+    try {
+      const d = new Date(ts);
+      if (isNaN(d.getTime())) return '—';
+      const datePart = d.toLocaleDateString('en-GB', {
+        day: 'numeric',
+        month: 'short',
+        year: 'numeric',
+        timeZone: 'Asia/Kolkata',
+      });
+      const timePart = d.toLocaleTimeString('en-US', {
+        hour: 'numeric',
+        minute: '2-digit',
+        hour12: true,
+        timeZone: 'Asia/Kolkata',
+      });
+      return `${datePart} · ${timePart} IST`;
+    } catch {
+      return '—';
+    }
+  };
+
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState(false);
@@ -99,25 +141,45 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     }, 4000);
   };
 
-  // STEP 1: Fetch Admin Data with fallback
-  const fetchAdminData = async () => {
+  // Fetch Events and Admin Data
+  const fetchAdminData = async (targetEventId?: string) => {
     try {
       setLoading(true);
       setError(null);
 
-      const res = await fetch('/api/admin/data', {
-        headers: authHeaders,
-      });
+      const queryEventId = targetEventId !== undefined ? targetEventId : selectedEventId;
+      const url = queryEventId ? `/api/admin/data?eventId=${encodeURIComponent(queryEventId)}` : '/api/admin/data';
 
-      if (!res.ok) {
-        if (res.status === 401 || res.status === 403) {
+      const [resData, resEvents] = await Promise.all([
+        fetch(url, { headers: authHeaders }),
+        fetch('/api/admin/events', { headers: authHeaders }),
+      ]);
+
+      if (!resData.ok) {
+        if (resData.status === 401 || resData.status === 403) {
           onLogout();
           return;
         }
-        throw new Error(`Server returned HTTP ${res.status}`);
+        throw new Error(`Server returned HTTP ${resData.status}`);
       }
 
-      const json = await res.json();
+      const json = await resData.json();
+
+      let fetchedEvents: OdhkanEventItem[] = [];
+      if (resEvents.ok) {
+        const eventsJson = await resEvents.json();
+        if (eventsJson.success && Array.isArray(eventsJson.events)) {
+          fetchedEvents = eventsJson.events;
+          setEvents(fetchedEvents);
+        }
+      }
+
+      const activeEvt = fetchedEvents.find((e) => e.isActive) || fetchedEvents[0];
+      const activeId = activeEvt?.id || json?.activeEventId || json?.event?.id;
+      setActiveEventId(activeId);
+
+      const effectiveSelectedId = queryEventId || activeId;
+      setSelectedEventId(effectiveSelectedId);
 
       setData({
         totalRegistrations: Number(json?.totalRegistrations) || 0,
@@ -130,6 +192,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         withdrawnAfterMatchingCount: Number(json?.withdrawnAfterMatchingCount) || 0,
         needsRemix: Boolean(json?.needsRemix),
         event: {
+          id: json?.event?.id,
+          name: json?.event?.name,
           stage: json?.event?.stage || 'REGISTRATION_OPEN',
           revealTime: json?.event?.revealTime || new Date().toISOString(),
           registrationOpen: json?.event?.registrationOpen ?? true,
@@ -137,6 +201,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           isPublished: json?.event?.isPublished ?? false,
           publishedAt: json?.event?.publishedAt ?? null,
         },
+        events: fetchedEvents,
+        activeEventId: activeId,
         duplicateSummary: {
           duplicateCount: Number(json?.duplicateSummary?.duplicateCount) || 0,
           unresolvedCount: Number(json?.duplicateSummary?.unresolvedCount) || 0,
@@ -159,6 +225,87 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     fetchAdminData();
   }, [token]);
 
+  // Event Management Handlers
+  const handleCreateEvent = async (eventData: Partial<OdhkanEventItem>) => {
+    setActionLoading(true);
+    try {
+      const res = await fetch('/api/admin/events', {
+        method: 'POST',
+        headers: authHeaders,
+        body: JSON.stringify(eventData),
+      });
+      const result = await res.json();
+      if (!res.ok || !result.success) {
+        throw new Error(result.error || 'Failed to create event');
+      }
+      showFeedback('success', `Created event "${result.event?.name || result.event?.id}".`);
+      await fetchAdminData(result.event?.id);
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleUpdateEvent = async (eventId: string, eventData: Partial<OdhkanEventItem>) => {
+    setActionLoading(true);
+    try {
+      const res = await fetch(`/api/admin/events/${encodeURIComponent(eventId)}`, {
+        method: 'PUT',
+        headers: authHeaders,
+        body: JSON.stringify(eventData),
+      });
+      const result = await res.json();
+      if (!res.ok || !result.success) {
+        throw new Error(result.error || 'Failed to update event');
+      }
+      showFeedback('success', 'Event updated successfully.');
+      await fetchAdminData(selectedEventId);
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleDeleteEvent = async (eventId: string) => {
+    setActionLoading(true);
+    try {
+      const res = await fetch(`/api/admin/events/${encodeURIComponent(eventId)}`, {
+        method: 'DELETE',
+        headers: authHeaders,
+      });
+      const result = await res.json();
+      if (!res.ok || !result.success) {
+        throw new Error(result.error || 'Failed to delete event');
+      }
+      showFeedback('success', 'Event deleted.');
+      await fetchAdminData();
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleSetActiveEvent = async (eventId: string) => {
+    setActionLoading(true);
+    try {
+      const res = await fetch(`/api/admin/events/${encodeURIComponent(eventId)}/activate`, {
+        method: 'POST',
+        headers: authHeaders,
+      });
+      const result = await res.json();
+      if (!res.ok || !result.success) {
+        throw new Error(result.error || 'Failed to set active event');
+      }
+      showFeedback('success', `Active event set to ${result.event?.name || eventId}. Countdown updated!`);
+      await fetchAdminData(eventId);
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleSelectEvent = async (eventId: string) => {
+    setSelectedEventId(eventId);
+    setActiveTab('operations');
+    await fetchAdminData(eventId);
+  };
+
   // Toggle Registration Status
   const handleToggleRegistration = async () => {
     setActionLoading(true);
@@ -167,10 +314,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       const res = await fetch('/api/admin/toggle-registration', {
         method: 'POST',
         headers: authHeaders,
-        body: JSON.stringify({ isOpen: nextState }),
+        body: JSON.stringify({ isOpen: nextState, eventId: selectedEventId }),
       });
       if (res.ok) {
-        await fetchAdminData();
+        await fetchAdminData(selectedEventId);
         showFeedback('success', `Registration is now ${nextState ? 'OPEN' : 'CLOSED'}.`);
       } else {
         showFeedback('error', 'Failed to toggle registration.');
@@ -189,9 +336,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       const res = await fetch('/api/admin/duplicate-check', {
         method: 'POST',
         headers: authHeaders,
+        body: JSON.stringify({ eventId: selectedEventId }),
       });
       if (res.ok) {
-        await fetchAdminData();
+        await fetchAdminData(selectedEventId);
         showFeedback('success', 'Duplicate check complete.');
       } else {
         showFeedback('error', 'Duplicate check failed.');
@@ -213,7 +361,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         body: JSON.stringify({ rollNumber, choice }),
       });
       if (res.ok) {
-        await fetchAdminData();
+        await fetchAdminData(selectedEventId);
         showFeedback('success', `Resolved duplicate for ${rollNumber}.`);
       } else {
         showFeedback('error', 'Failed to resolve duplicate.');
@@ -233,12 +381,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       const res = await fetch('/api/admin/mix-match', {
         method: 'POST',
         headers: authHeaders,
+        body: JSON.stringify({ eventId: selectedEventId }),
       });
       const result = await res.json();
       if (!res.ok || !result.success) {
         showFeedback('error', result.error || 'Mix match failed.');
       } else {
-        await fetchAdminData();
+        await fetchAdminData(selectedEventId);
         showFeedback('success', `Mix complete! Generated ${result.groupsCount} groups.`);
       }
     } catch {
@@ -256,9 +405,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       const res = await fetch('/api/admin/lock-groups', {
         method: 'POST',
         headers: authHeaders,
+        body: JSON.stringify({ eventId: selectedEventId }),
       });
       if (res.ok) {
-        await fetchAdminData();
+        await fetchAdminData(selectedEventId);
         showFeedback('success', 'Groups locked.');
       } else {
         showFeedback('error', 'Failed to lock groups.');
@@ -277,6 +427,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       const res = await fetch('/api/admin/final-check', {
         method: 'POST',
         headers: authHeaders,
+        body: JSON.stringify({ eventId: selectedEventId }),
       });
       if (res.ok) {
         const check: IntegrityCheckResult = await res.json();
@@ -299,12 +450,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       const res = await fetch('/api/admin/publish-final-list', {
         method: 'POST',
         headers: authHeaders,
+        body: JSON.stringify({ eventId: selectedEventId }),
       });
       const result = await res.json();
       if (!res.ok || !result.success) {
         showFeedback('error', result.error || 'Failed to publish list.');
       } else {
-        await fetchAdminData();
+        await fetchAdminData(selectedEventId);
         setShowPublishModal(false);
         showFeedback('success', 'Final Odhkan list published to public website!');
       }
@@ -328,11 +480,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           name: testName.trim(),
           rollNumber: testRoll.trim(),
           phoneNumber: testPhone.trim() || '9876543210',
+          eventId: selectedEventId,
         }),
       });
       const result = await res.json();
       if (res.ok && result.success) {
-        await fetchAdminData();
+        await fetchAdminData(selectedEventId);
         setShowAddModal(false);
         setTestName('');
         setTestRoll('');
@@ -436,7 +589,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               Back to Home
             </button>
             <button
-              onClick={fetchAdminData}
+              onClick={() => fetchAdminData()}
               className="px-4 py-2 bg-neutral-950 text-white text-xs font-semibold rounded-lg hover:bg-neutral-800 cursor-pointer"
             >
               Retry Loading
@@ -476,7 +629,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           )}
 
           <button
-            onClick={fetchAdminData}
+            onClick={() => fetchAdminData()}
             disabled={loading}
             className="p-2 rounded-lg text-neutral-600 hover:text-black hover:bg-neutral-100 transition-colors cursor-pointer"
             title="Refresh Data"
@@ -503,33 +656,172 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       </header>
 
       <main className="max-w-6xl mx-auto px-4 sm:px-6 pt-6 sm:pt-8 space-y-6">
-        {/* 2. POST-MATCHING WITHDRAWAL NOTICE (Section 10 prompt requirement) */}
-        {data.needsRemix && (
-          <div className="bg-amber-50 border border-amber-300 rounded-2xl p-4 sm:p-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 shadow-xs">
-            <div className="flex items-start gap-3">
-              <div className="w-9 h-9 rounded-lg bg-amber-200 text-amber-900 flex items-center justify-center shrink-0">
-                <AlertTriangle className="w-5 h-5" />
+        {/* TAB CONTROLS & EVENT SELECTOR */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white p-2.5 sm:p-3 rounded-2xl border border-[#ECEAE4] shadow-xs">
+          <div className="flex flex-wrap items-center gap-1.5 bg-neutral-100 p-1 rounded-xl">
+            <button
+              onClick={() => setActiveTab('events')}
+              className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                activeTab === 'events'
+                  ? 'bg-white text-neutral-950 shadow-xs'
+                  : 'text-neutral-600 hover:text-neutral-900'
+              }`}
+            >
+              <Calendar className="w-3.5 h-3.5" />
+              <span>Events</span>
+              <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-neutral-200 text-neutral-800 font-mono">
+                {events.length}
+              </span>
+            </button>
+
+            <button
+              onClick={() => setActiveTab('operations')}
+              className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                activeTab === 'operations'
+                  ? 'bg-white text-neutral-950 shadow-xs'
+                  : 'text-neutral-600 hover:text-neutral-900'
+              }`}
+            >
+              <Layers className="w-3.5 h-3.5" />
+              <span>Operations</span>
+              <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-emerald-100 text-emerald-800 font-mono font-bold">
+                {data.activeParticipants}
+              </span>
+            </button>
+
+            <button
+              onClick={() => setActiveTab('withdrawals')}
+              className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                activeTab === 'withdrawals'
+                  ? 'bg-white text-neutral-950 shadow-xs'
+                  : 'text-neutral-600 hover:text-neutral-900'
+              }`}
+            >
+              <UserMinus className="w-3.5 h-3.5 text-red-600" />
+              <span>Withdrawals</span>
+              {data.withdrawnCount > 0 && (
+                <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-red-100 text-red-800 font-mono font-bold">
+                  {data.withdrawnCount}
+                </span>
+              )}
+            </button>
+
+            <button
+              onClick={() => setActiveTab('emails')}
+              className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                activeTab === 'emails'
+                  ? 'bg-white text-neutral-950 shadow-xs'
+                  : 'text-neutral-600 hover:text-neutral-900'
+              }`}
+            >
+              <Mail className="w-3.5 h-3.5 text-amber-600" />
+              <span>Email System</span>
+              <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-amber-100 text-amber-900 font-mono font-bold">
+                ₹0 Free
+              </span>
+            </button>
+          </div>
+
+          {/* Active / Selected Event Selector */}
+          <div className="flex items-center gap-2 text-xs">
+            <span className="text-neutral-500 font-medium hidden md:inline">Selected Event:</span>
+            <select
+              value={selectedEventId || ''}
+              onChange={(e) => handleSelectEvent(e.target.value)}
+              className="text-xs font-semibold bg-neutral-50 border border-neutral-300 rounded-lg px-2.5 py-1.5 text-neutral-900 focus:outline-hidden focus:ring-1 focus:ring-neutral-900 cursor-pointer max-w-[260px] truncate"
+            >
+              {events.map((evt) => (
+                <option key={evt.id} value={evt.id}>
+                  {evt.name || evt.id} {evt.id === activeEventId ? '★ (Active)' : ''} ({evt.status})
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        {/* EVENTS SECTION */}
+        {activeTab === 'events' && (
+          <AdminEventsSection
+            events={events}
+            activeEventId={activeEventId}
+            selectedEventId={selectedEventId}
+            onSelectEvent={handleSelectEvent}
+            onSetActiveEvent={handleSetActiveEvent}
+            onCreateEvent={handleCreateEvent}
+            onUpdateEvent={handleUpdateEvent}
+            onDeleteEvent={handleDeleteEvent}
+            onViewHistory={(id) => setHistoryEventId(id)}
+            actionLoading={actionLoading}
+          />
+        )}
+
+        {/* OPERATIONS CONTENT */}
+        {activeTab === 'operations' && (
+          <div className="space-y-6">
+            {/* Selected Event Details Header */}
+            <div className="bg-white rounded-2xl border border-[#ECEAE4] p-4 flex flex-wrap items-center justify-between gap-3 shadow-xs">
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-xl bg-neutral-900 text-white flex items-center justify-center font-bold text-sm">
+                  {data.event?.id ? data.event.id.slice(0, 2).toUpperCase() : 'OD'}
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h2 className="text-sm font-bold text-neutral-950 font-sans">
+                      {data.event?.name || 'Odhkan Event'}
+                    </h2>
+                    <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-neutral-100 text-neutral-600 border border-neutral-200">
+                      {data.event?.id || selectedEventId}
+                    </span>
+                    {selectedEventId === activeEventId && (
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-600 text-white">
+                        Live Countdown Target
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs text-neutral-500 mt-0.5">
+                    Reveal: {parseISTDate(data.event?.revealTime || new Date().toISOString()).fullDisplay}
+                  </p>
+                </div>
               </div>
-              <div>
-                <h4 className="text-sm font-bold text-amber-950 font-sans">
-                  {data.withdrawnAfterMatchingCount} participant{data.withdrawnAfterMatchingCount > 1 ? 's' : ''} withdrew after matching.
-                </h4>
-                <p className="text-xs text-amber-900 mt-0.5">
-                  Groups need to be remixed before publishing the final list.
-                </p>
+
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setHistoryEventId(selectedEventId || activeEventId || null)}
+                  className="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg border border-neutral-200 bg-neutral-50 hover:bg-neutral-100 text-neutral-700 transition-colors cursor-pointer"
+                >
+                  <Users className="w-3.5 h-3.5 text-neutral-500" />
+                  <span>Participant History</span>
+                </button>
               </div>
             </div>
 
-            <button
-              onClick={handleMixMatch}
-              disabled={actionLoading}
-              className="inline-flex items-center gap-1.5 bg-neutral-950 text-white text-xs font-bold px-4 py-2.5 rounded-lg hover:bg-neutral-800 transition-colors cursor-pointer shrink-0 shadow-xs"
-            >
-              <Shuffle className="w-3.5 h-3.5" />
-              <span>Mix Again</span>
-            </button>
-          </div>
-        )}
+            {/* 2. POST-MATCHING WITHDRAWAL NOTICE (Section 10 prompt requirement) */}
+            {data.needsRemix && (
+              <div className="bg-amber-50 border border-amber-300 rounded-2xl p-4 sm:p-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 shadow-xs">
+                <div className="flex items-start gap-3">
+                  <div className="w-9 h-9 rounded-lg bg-amber-200 text-amber-900 flex items-center justify-center shrink-0">
+                    <AlertTriangle className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h4 className="text-sm font-bold text-amber-950 font-sans">
+                      {data.withdrawnAfterMatchingCount} participant{data.withdrawnAfterMatchingCount > 1 ? 's' : ''} withdrew after matching.
+                    </h4>
+                    <p className="text-xs text-amber-900 mt-0.5">
+                      Groups need to be remixed before publishing the final list.
+                    </p>
+                  </div>
+                </div>
+
+                <button
+                  onClick={handleMixMatch}
+                  disabled={actionLoading}
+                  className="inline-flex items-center gap-1.5 bg-neutral-950 text-white text-xs font-bold px-4 py-2.5 rounded-lg hover:bg-neutral-800 transition-colors cursor-pointer shrink-0 shadow-xs"
+                >
+                  <Shuffle className="w-3.5 h-3.5" />
+                  <span>Mix Again</span>
+                </button>
+              </div>
+            )}
 
         {/* 3. REGISTRATION OVERVIEW CARDS (Section 10 breakdown) */}
         <section className="bg-white rounded-2xl border border-[#ECEAE4] p-5 sm:p-6 shadow-xs">
@@ -716,7 +1008,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 )}
               </div>
 
-              {/* Table with Name | Roll Number | Batch | Phone | Registered At | Status */}
+              {/* Table with Name | Roll Number | Batch | Registered At | Withdrawn At | Status */}
               <div className="border border-[#ECEAE4] rounded-xl overflow-hidden">
                 <div className="max-h-96 overflow-y-auto">
                   <table className="w-full text-left text-xs sm:text-sm">
@@ -725,8 +1017,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                         <th className="py-2.5 px-4">Name</th>
                         <th className="py-2.5 px-4">Roll Number</th>
                         <th className="py-2.5 px-4">Batch</th>
-                        <th className="py-2.5 px-4">Phone</th>
                         <th className="py-2.5 px-4">Registered At</th>
+                        <th className="py-2.5 px-4">Withdrawn At</th>
                         <th className="py-2.5 px-4">Status</th>
                       </tr>
                     </thead>
@@ -742,16 +1034,23 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                           <td className="py-2.5 px-4 font-mono text-neutral-600">
                             {reg.batch}
                           </td>
-                          <td className="py-2.5 px-4 font-mono text-neutral-600 text-xs">
-                            {reg.phoneNumber || '—'}
-                          </td>
                           <td className="py-2.5 px-4 text-neutral-500 text-xs">
                             {new Date(reg.registeredAt).toLocaleString('en-IN', {
                               month: 'short',
                               day: 'numeric',
                               hour: 'numeric',
                               minute: '2-digit',
+                              timeZone: 'Asia/Kolkata',
                             })}
+                          </td>
+                          <td className="py-2.5 px-4 text-xs font-mono">
+                            {reg.status === 'withdrawn' ? (
+                              <span className="text-red-700 font-semibold bg-red-50/80 px-2 py-0.5 rounded border border-red-200/50">
+                                {formatWithdrawalIST(reg.withdrawnAt)}
+                              </span>
+                            ) : (
+                              <span className="text-neutral-400">—</span>
+                            )}
                           </td>
                           <td className="py-2.5 px-4">
                             {reg.status === 'active' || reg.status === 'valid' ? (
@@ -1088,7 +1387,34 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             </a>
           </div>
         </section>
+        </div>
+        )}
+
+        {/* 3. WITHDRAWAL ACTIVITY & ANALYTICS TAB */}
+        {activeTab === 'withdrawals' && (
+          <AdminWithdrawalSection
+            token={token}
+            selectedEventId={selectedEventId}
+            onRefreshData={() => fetchAdminData(selectedEventId)}
+          />
+        )}
+
+        {/* 4. AUTOMATED EMAIL SYSTEM (₹0) TAB */}
+        {activeTab === 'emails' && (
+          <AdminEmailSection
+            token={token}
+            selectedEvent={events.find((e) => e.id === selectedEventId) || events[0]}
+            onRefreshData={() => fetchAdminData(selectedEventId)}
+          />
+        )}
       </main>
+
+      {/* MODAL: EVENT HISTORY & PARTICIPANT ROSTER */}
+      <EventHistoryModal
+        eventId={historyEventId}
+        token={token}
+        onClose={() => setHistoryEventId(null)}
+      />
 
       {/* MODAL: ADD TEST PARTICIPANT */}
       {showAddModal && (

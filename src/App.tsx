@@ -27,6 +27,13 @@ export default function App() {
   const [eventStatus, setEventStatus] = useState<'open' | 'locked' | 'revealed'>('open');
   const [revealTime, setRevealTime] = useState<string>(new Date().toISOString());
   const [isRevealed, setIsRevealed] = useState<boolean>(false);
+  const [eventId, setEventId] = useState<string>('');
+  const [eventName, setEventName] = useState<string>('');
+  const [eventDate, setEventDate] = useState<string>('');
+  const [eventDay, setEventDay] = useState<string>('');
+  const [eventTimeFormatted, setEventTimeFormatted] = useState<string>('');
+  const [eventDisplayTitle, setEventDisplayTitle] = useState<string>('');
+
   const [countdown, setCountdown] = useState<CountdownTime>({
     days: 0,
     hours: 0,
@@ -80,16 +87,26 @@ export default function App() {
     }
   }, [currentPath, adminToken]);
 
+  const applyStatusData = (data: PublicStatus) => {
+    if (typeof data.totalCount === 'number') setTotalCount(data.totalCount);
+    if (data.eventStatus) setEventStatus(data.eventStatus);
+    if (data.revealTime) setRevealTime(data.revealTime);
+    if (typeof data.isRevealed === 'boolean') setIsRevealed(data.isRevealed);
+    if (data.eventId) setEventId(data.eventId);
+    if (data.eventName) setEventName(data.eventName);
+    if (data.eventDate) setEventDate(data.eventDate);
+    if (data.eventDay) setEventDay(data.eventDay);
+    if (data.eventTimeFormatted) setEventTimeFormatted(data.eventTimeFormatted);
+    if (data.eventDisplayTitle) setEventDisplayTitle(data.eventDisplayTitle);
+  };
+
   // Fetch public status
   const fetchStatus = useCallback(async () => {
     try {
       const res = await fetch('/api/public/status');
       if (res.ok) {
         const data: PublicStatus = await res.json();
-        setTotalCount(data.totalCount);
-        setEventStatus(data.eventStatus);
-        setRevealTime(data.revealTime);
-        setIsRevealed(data.isRevealed);
+        applyStatusData(data);
       }
     } catch (err) {
       console.error('Error fetching Odhkan status:', err);
@@ -106,10 +123,7 @@ export default function App() {
       eventSource.onmessage = (event) => {
         try {
           const data: PublicStatus = JSON.parse(event.data);
-          setTotalCount(data.totalCount);
-          setEventStatus(data.eventStatus);
-          setRevealTime(data.revealTime);
-          setIsRevealed(data.isRevealed);
+          applyStatusData(data);
         } catch {
           // ignore
         }
@@ -229,6 +243,10 @@ export default function App() {
             isRevealed={isRevealed}
             onJoinClick={() => setIsJoinOpen(true)}
             onRevealClick={() => setIsRevealOpen(true)}
+            eventDate={eventDate}
+            eventDay={eventDay}
+            eventTimeFormatted={eventTimeFormatted}
+            eventDisplayTitle={eventDisplayTitle}
           />
 
           {/* 3. COMMUNITY SECTION (Live Count with STRICT NO BATCH BREAKDOWN) */}
@@ -242,6 +260,10 @@ export default function App() {
             countdown={countdown}
             isRevealed={isRevealed}
             onRevealClick={() => setIsRevealOpen(true)}
+            eventDate={eventDate}
+            eventDay={eventDay}
+            eventTimeFormatted={eventTimeFormatted}
+            eventDisplayTitle={eventDisplayTitle}
           />
 
           {/* 6. FINAL CTA */}
@@ -266,6 +288,7 @@ export default function App() {
           totalCount={totalCount}
           onParticipantJoined={fetchStatus}
           onOpenWithdraw={handleOpenWithdraw}
+          eventId={eventId}
         />
 
         <RevealModal
@@ -273,12 +296,14 @@ export default function App() {
           onClose={() => setIsRevealOpen(false)}
           isRevealed={isRevealed}
           onOpenWithdraw={handleOpenWithdraw}
+          eventId={eventId}
         />
 
         <WithdrawModal
           isOpen={isWithdrawOpen}
           onClose={() => setIsWithdrawOpen(false)}
           prefilledRoll={withdrawPrefillRoll}
+          eventId={eventId}
           onWithdrawnSuccess={(newTotal) => {
             if (typeof newTotal === 'number') {
               setTotalCount(newTotal);

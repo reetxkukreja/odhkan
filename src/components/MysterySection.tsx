@@ -5,12 +5,20 @@ interface MysterySectionProps {
   countdown: CountdownTime;
   isRevealed: boolean;
   onRevealClick: () => void;
+  eventDate?: string;
+  eventDay?: string;
+  eventTimeFormatted?: string;
+  eventDisplayTitle?: string;
 }
 
 export const MysterySection: React.FC<MysterySectionProps> = ({
   countdown,
   isRevealed,
   onRevealClick,
+  eventDate,
+  eventDay,
+  eventTimeFormatted,
+  eventDisplayTitle,
 }) => {
   return (
     <section id="mystery" className="py-24 sm:py-32 px-4 sm:px-6 border-t border-black/10 bg-[#E11D1E]">
@@ -22,7 +30,7 @@ export const MysterySection: React.FC<MysterySectionProps> = ({
 
         {/* Supporting copy */}
         <p className="text-xl sm:text-2xl font-medium text-white/80 mb-6">
-          Meeting on Friday.
+          Meeting on {eventDay || 'Friday'}.
         </p>
 
         {/* Grounded Paragraph */}
@@ -33,7 +41,7 @@ export const MysterySection: React.FC<MysterySectionProps> = ({
         {/* Reveal Target Banner Card */}
         <div className="inline-flex flex-col items-center bg-white border border-neutral-200 rounded-2xl p-6 sm:p-8 max-w-lg w-full shadow-md text-neutral-950">
           <span className="text-xs font-semibold uppercase tracking-widest text-[#E11D1E] mb-2">
-            Friday at 3:00 PM
+            {eventDisplayTitle || 'Friday at 3:00 PM'}
           </span>
 
           <span className="text-2xl sm:text-3xl font-extrabold tracking-tight text-neutral-950 mb-4 font-sans">
@@ -93,7 +101,7 @@ export const MysterySection: React.FC<MysterySectionProps> = ({
                 </div>
               </div>
               <p className="text-xs text-neutral-500 mt-4 font-medium">
-                Groups revealed Friday at 3:00 PM IST
+                Groups revealed {eventDate ? `${eventDate} · ${eventTimeFormatted || '3:00 PM'} IST` : 'Friday at 3:00 PM IST'}
               </p>
             </div>
           )}

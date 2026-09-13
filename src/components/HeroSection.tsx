@@ -9,6 +9,10 @@ interface HeroSectionProps {
   isRevealed: boolean;
   onJoinClick: () => void;
   onRevealClick: () => void;
+  eventDate?: string;
+  eventDay?: string;
+  eventTimeFormatted?: string;
+  eventDisplayTitle?: string;
 }
 
 export const HeroSection: React.FC<HeroSectionProps> = ({
@@ -17,6 +21,10 @@ export const HeroSection: React.FC<HeroSectionProps> = ({
   isRevealed,
   onJoinClick,
   onRevealClick,
+  eventDate,
+  eventDay,
+  eventTimeFormatted,
+  eventDisplayTitle,
 }) => {
   return (
     <section className="relative pt-12 sm:pt-20 pb-16 sm:pb-20 px-4 sm:px-6">
@@ -91,18 +99,23 @@ export const HeroSection: React.FC<HeroSectionProps> = ({
             </p>
           </div>
 
-          {/* Friday Countdown Block */}
+          {/* Dynamic Event Countdown Block */}
           <div className="bg-white border border-neutral-200 rounded-xl p-5 sm:p-6 shadow-2xs flex flex-col justify-between">
             <div className="flex items-center gap-2 mb-2 text-neutral-600">
               <Clock className="w-3.5 h-3.5 text-neutral-700" />
               <span className="text-[11px] font-bold uppercase tracking-wider text-neutral-800">
-                Groups meet Friday at 3:00 PM
+                Groups meet {eventDisplayTitle || 'Friday at 3:00 PM'}
               </span>
             </div>
 
             {isRevealed ? (
-              <div className="flex items-center gap-2 text-emerald-700 font-bold text-xl sm:text-2xl">
-                <span>● Groups Revealed</span>
+              <div className="flex flex-col gap-1">
+                <div className="flex items-center gap-2 text-emerald-700 font-bold text-xl sm:text-2xl">
+                  <span>● Groups Revealed</span>
+                </div>
+                <p className="text-xs text-neutral-500">
+                  {eventDate ? `${eventDate} · Reveal active` : 'The wait is over. Find your group.'}
+                </p>
               </div>
             ) : (
               <div>
@@ -110,7 +123,7 @@ export const HeroSection: React.FC<HeroSectionProps> = ({
                   {formatCountdownString(countdown)}
                 </div>
                 <p className="text-xs text-neutral-500 mt-1">
-                  Three people from across the college.
+                  Three people from across the college · {eventDate || 'Coming soon'}
                 </p>
               </div>
             )}
