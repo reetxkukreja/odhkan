@@ -3,8 +3,6 @@ import {
   Calendar,
   Clock,
   Plus,
-  CheckCircle,
-  AlertCircle,
   Users,
   Shield,
   Trash2,
@@ -12,7 +10,9 @@ import {
   Eye,
   Star,
   Layers,
-  ArrowRight,
+  Lock,
+  AlertTriangle,
+  Loader2,
 } from 'lucide-react';
 import { OdhkanEventItem } from '../types';
 import { parseISTDate, istToUtcIso } from '../utils/istDate';
@@ -44,9 +44,10 @@ export const AdminEventsSection: React.FC<AdminEventsSectionProps> = ({
 }) => {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [editingEvent, setEditingEvent] = useState<OdhkanEventItem | null>(null);
+  const [submitting, setSubmitting] = useState(false);
 
   // Form State for Create / Edit
-  const [eventName, setEventName] = useState('Odhkan Event');
+  const [eventName, setEventName] = useState('Odhkan 02');
   const [dateInput, setDateInput] = useState('2026-09-19');
   const [timeInput, setTimeInput] = useState('15:00');
   const [regStartDate, setRegStartDate] = useState('');
@@ -55,17 +56,16 @@ export const AdminEventsSection: React.FC<AdminEventsSectionProps> = ({
   const [formError, setFormError] = useState<string | null>(null);
 
   const resetForm = () => {
-    // Default next Friday or upcoming date
-    const now = new Date();
-    const parsed = parseISTDate(now.toISOString());
-    setEventName('Odhkan Event');
-    setDateInput(parsed.dateInput);
+    const nextNumber = events.length > 0 ? String(events.length + 1).padStart(2, '0') : '02';
+    setEventName(`Odhkan ${nextNumber}`);
+    setDateInput('2026-09-19');
     setTimeInput('15:00');
     setRegStartDate('');
     setRegEndDate('');
     setEventStatus('open');
     setFormError(null);
     setEditingEvent(null);
+    setSubmitting(false);
   };
 
   const handleOpenCreate = () => {
@@ -77,24 +77,44 @@ export const AdminEventsSection: React.FC<AdminEventsSectionProps> = ({
     setEditingEvent(evt);
     setEventName(evt.name || 'Odhkan Event');
     const parsed = parseISTDate(evt.revealTime);
-    setDateInput(parsed.dateInput);
-    setTimeInput(parsed.timeInput);
+    setDateInput(parsed.dateInput || '2026-09-19');
+    setTimeInput(parsed.timeInput || '15:00');
     setRegStartDate(evt.registrationStart ? parseISTDate(evt.registrationStart).dateInput : '');
     setRegEndDate(evt.registrationEnd ? parseISTDate(evt.registrationEnd).dateInput : '');
     setEventStatus(evt.status || 'open');
     setFormError(null);
+    setSubmitting(false);
     setShowCreateModal(true);
   };
 
+  const isTimingLocked =
+    Boolean(editingEvent && (editingEvent.isPublished || editingEvent.groupsLocked || editingEvent.status === 'completed'));
+
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (submitting || actionLoading) return;
+
     setFormError(null);
+
+    const trimmedName = eventName.trim();
+    if (!trimmedName) {
+      setFormError('Please enter an event title/name.');
+      return;
+    }
 
     if (!dateInput || !timeInput) {
       setFormError('Please choose both the Event Date and Reveal Time.');
       return;
     }
 
+    if (regStartDate && regEndDate) {
+      if (new Date(regEndDate).getTime() < new Date(regStartDate).getTime()) {
+        setFormError('Registration end date cannot be earlier than registration start date.');
+        return;
+      }
+    }
+
+    setSubmitting(true);
     try {
       const revealUtcIso = istToUtcIso(dateInput, timeInput);
       const regStartIso = regStartDate ? istToUtcIso(regStartDate, '00:00') : null;
@@ -102,16 +122,18 @@ export const AdminEventsSection: React.FC<AdminEventsSectionProps> = ({
 
       if (editingEvent) {
         await onUpdateEvent(editingEvent.id, {
-          name: eventName.trim() || 'Odhkan Event',
-          revealTime: revealUtcIso,
-          registrationStart: regStartIso,
-          registrationEnd: regEndIso,
+          name: trimmedName,
+          revealTime: isTimingLocked ? editingEvent.revealTime : revealUtcIso,
+          eventDate: isTimingLocked ? editingEvent.eventDate : dateInput,
+          registrationStart: isTimingLocked ? editingEvent.registrationStart : regStartIso,
+          registrationEnd: isTimingLocked ? editingEvent.registrationEnd : regEndIso,
           status: eventStatus,
         });
       } else {
         await onCreateEvent({
-          name: eventName.trim() || 'Odhkan Event',
+          name: trimmedName,
           revealTime: revealUtcIso,
+          eventDate: dateInput,
           registrationStart: regStartIso,
           registrationEnd: regEndIso,
           status: eventStatus,
@@ -121,6 +143,8 @@ export const AdminEventsSection: React.FC<AdminEventsSectionProps> = ({
       resetForm();
     } catch (err: any) {
       setFormError(err.message || 'Failed to save event.');
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -141,11 +165,11 @@ export const AdminEventsSection: React.FC<AdminEventsSectionProps> = ({
 
         <button
           onClick={handleOpenCreate}
-          disabled={actionLoading}
-          className="inline-flex items-center gap-2 bg-neutral-950 text-white text-xs font-semibold px-3.5 py-2 rounded-lg hover:bg-neutral-800 active:scale-[0.99] transition-all cursor-pointer shadow-xs shrink-0 self-start sm:self-auto"
+          disabled={actionLoading || submitting}
+          className="inline-flex items-center gap-2 bg-neutral-950 text-white text-xs font-semibold px-3.5 py-2 rounded-lg hover:bg-neutral-800 active:scale-[0.99] transition-all cursor-pointer shadow-xs shrink-0 self-start sm:self-auto disabled:opacity-50"
         >
           <Plus className="w-3.5 h-3.5" />
-          <span>Create Future Event</span>
+          <span>Create Next Odhkan Event</span>
         </button>
       </div>
 
@@ -155,7 +179,7 @@ export const AdminEventsSection: React.FC<AdminEventsSectionProps> = ({
           <Calendar className="w-8 h-8 text-neutral-400 mx-auto mb-2" />
           <p className="text-sm font-semibold text-neutral-700">No events created yet.</p>
           <p className="text-xs text-neutral-500 mt-1">
-            Click "Create Future Event" above to schedule your next Odhkan reveal.
+            Click &quot;Create Next Odhkan Event&quot; above to schedule your next Odhkan reveal.
           </p>
         </div>
       ) : (
@@ -256,7 +280,7 @@ export const AdminEventsSection: React.FC<AdminEventsSectionProps> = ({
                     {!isActive && (
                       <button
                         onClick={() => onSetActiveEvent(evt.id)}
-                        disabled={actionLoading}
+                        disabled={actionLoading || submitting}
                         className="inline-flex items-center gap-1 text-xs font-semibold px-2.5 py-1.5 rounded-lg border border-neutral-300 bg-white hover:bg-neutral-50 text-neutral-800 transition-colors cursor-pointer"
                         title="Set this event as the live public countdown target"
                       >
@@ -267,7 +291,7 @@ export const AdminEventsSection: React.FC<AdminEventsSectionProps> = ({
 
                     <button
                       onClick={() => onSelectEvent(evt.id)}
-                      disabled={actionLoading}
+                      disabled={actionLoading || submitting}
                       className={`inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors cursor-pointer ${
                         isSelected
                           ? 'bg-neutral-950 text-white'
@@ -280,7 +304,7 @@ export const AdminEventsSection: React.FC<AdminEventsSectionProps> = ({
 
                     <button
                       onClick={() => onViewHistory(evt.id)}
-                      disabled={actionLoading}
+                      disabled={actionLoading || submitting}
                       className="inline-flex items-center gap-1 text-xs font-semibold px-2.5 py-1.5 rounded-lg border border-neutral-200 bg-white hover:bg-neutral-50 text-neutral-700 transition-colors cursor-pointer"
                       title="View participant and group history"
                     >
@@ -290,9 +314,9 @@ export const AdminEventsSection: React.FC<AdminEventsSectionProps> = ({
 
                     <button
                       onClick={() => handleOpenEdit(evt)}
-                      disabled={actionLoading}
+                      disabled={actionLoading || submitting}
                       className="p-1.5 text-neutral-600 hover:text-neutral-950 hover:bg-neutral-100 rounded-lg transition-colors cursor-pointer"
-                      title="Edit event timing & status"
+                      title="Edit event metadata"
                     >
                       <Edit2 className="w-3.5 h-3.5" />
                     </button>
@@ -304,7 +328,7 @@ export const AdminEventsSection: React.FC<AdminEventsSectionProps> = ({
                             onDeleteEvent(evt.id);
                           }
                         }}
-                        disabled={actionLoading}
+                        disabled={actionLoading || submitting}
                         className="p-1.5 text-red-600 hover:text-red-800 hover:bg-red-50 rounded-lg transition-colors cursor-pointer"
                         title="Delete event"
                       >
@@ -326,13 +350,25 @@ export const AdminEventsSection: React.FC<AdminEventsSectionProps> = ({
             <h3 className="text-lg font-bold text-neutral-950 font-sans mb-1">
               {editingEvent ? 'Edit Odhkan Event' : 'Create Next Odhkan Event'}
             </h3>
-            <p className="text-xs text-neutral-500 mb-5">
-              Select the event date and reveal time in India Standard Time (IST).
+            <p className="text-xs text-neutral-500 mb-4">
+              {editingEvent
+                ? 'Update event details and scheduling parameters in India Standard Time (IST).'
+                : 'Select the event date and reveal time in India Standard Time (IST).'}
             </p>
 
+            {isTimingLocked && (
+              <div className="bg-amber-50 border border-amber-300 rounded-xl p-3 mb-4 flex items-start gap-2.5 text-xs text-amber-900">
+                <Lock className="w-4 h-4 text-amber-700 shrink-0 mt-0.5" />
+                <div>
+                  <span className="font-bold">Historical Integrity Protection:</span> This event has locked groups, published rosters, or is marked completed. Date and reveal timing cannot be altered to protect records and reveal history. You can still update the Event Title or Status.
+                </div>
+              </div>
+            )}
+
             {formError && (
-              <div className="bg-red-50 border border-red-200 text-red-700 text-xs p-3 rounded-lg mb-4">
-                {formError}
+              <div className="bg-red-50 border border-red-200 text-red-700 text-xs p-3 rounded-lg mb-4 flex items-start gap-2">
+                <AlertTriangle className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />
+                <span>{formError}</span>
               </div>
             )}
 
@@ -345,7 +381,7 @@ export const AdminEventsSection: React.FC<AdminEventsSectionProps> = ({
                   type="text"
                   value={eventName}
                   onChange={(e) => setEventName(e.target.value)}
-                  placeholder="e.g. Odhkan Event"
+                  placeholder="e.g. Odhkan 02"
                   className="w-full text-sm border border-neutral-300 rounded-lg px-3 py-2 focus:outline-hidden focus:ring-2 focus:ring-neutral-900"
                   required
                 />
@@ -360,7 +396,8 @@ export const AdminEventsSection: React.FC<AdminEventsSectionProps> = ({
                     type="date"
                     value={dateInput}
                     onChange={(e) => setDateInput(e.target.value)}
-                    className="w-full text-sm border border-neutral-300 rounded-lg px-3 py-2 focus:outline-hidden focus:ring-2 focus:ring-neutral-900"
+                    disabled={isTimingLocked}
+                    className="w-full text-sm border border-neutral-300 rounded-lg px-3 py-2 focus:outline-hidden focus:ring-2 focus:ring-neutral-900 disabled:bg-neutral-100 disabled:text-neutral-500 disabled:cursor-not-allowed"
                     required
                   />
                 </div>
@@ -373,7 +410,8 @@ export const AdminEventsSection: React.FC<AdminEventsSectionProps> = ({
                     type="time"
                     value={timeInput}
                     onChange={(e) => setTimeInput(e.target.value)}
-                    className="w-full text-sm border border-neutral-300 rounded-lg px-3 py-2 focus:outline-hidden focus:ring-2 focus:ring-neutral-900"
+                    disabled={isTimingLocked}
+                    className="w-full text-sm border border-neutral-300 rounded-lg px-3 py-2 focus:outline-hidden focus:ring-2 focus:ring-neutral-900 disabled:bg-neutral-100 disabled:text-neutral-500 disabled:cursor-not-allowed"
                     required
                   />
                   <span className="text-[10px] text-neutral-400 mt-0.5 block">
@@ -388,7 +426,7 @@ export const AdminEventsSection: React.FC<AdminEventsSectionProps> = ({
                   <span className="text-neutral-500 block text-[10px] uppercase font-bold tracking-wider mb-0.5">
                     Preview (India Standard Time)
                   </span>
-                  <strong className="text-neutral-900">
+                  <strong className="text-neutral-900 font-sans">
                     {parseISTDate(istToUtcIso(dateInput, timeInput)).fullDisplay}
                   </strong>
                 </div>
@@ -403,7 +441,8 @@ export const AdminEventsSection: React.FC<AdminEventsSectionProps> = ({
                     type="date"
                     value={regStartDate}
                     onChange={(e) => setRegStartDate(e.target.value)}
-                    className="w-full text-sm border border-neutral-300 rounded-lg px-3 py-2 focus:outline-hidden focus:ring-2 focus:ring-neutral-900"
+                    disabled={isTimingLocked}
+                    className="w-full text-sm border border-neutral-300 rounded-lg px-3 py-2 focus:outline-hidden focus:ring-2 focus:ring-neutral-900 disabled:bg-neutral-100 disabled:text-neutral-500 disabled:cursor-not-allowed"
                   />
                 </div>
 
@@ -415,7 +454,8 @@ export const AdminEventsSection: React.FC<AdminEventsSectionProps> = ({
                     type="date"
                     value={regEndDate}
                     onChange={(e) => setRegEndDate(e.target.value)}
-                    className="w-full text-sm border border-neutral-300 rounded-lg px-3 py-2 focus:outline-hidden focus:ring-2 focus:ring-neutral-900"
+                    disabled={isTimingLocked}
+                    className="w-full text-sm border border-neutral-300 rounded-lg px-3 py-2 focus:outline-hidden focus:ring-2 focus:ring-neutral-900 disabled:bg-neutral-100 disabled:text-neutral-500 disabled:cursor-not-allowed"
                   />
                 </div>
               </div>
@@ -441,16 +481,18 @@ export const AdminEventsSection: React.FC<AdminEventsSectionProps> = ({
                 <button
                   type="button"
                   onClick={() => setShowCreateModal(false)}
-                  className="px-4 py-2 text-xs font-semibold text-neutral-700 hover:bg-neutral-100 rounded-lg cursor-pointer"
+                  disabled={submitting || actionLoading}
+                  className="px-4 py-2 text-xs font-semibold text-neutral-700 hover:bg-neutral-100 rounded-lg cursor-pointer disabled:opacity-50"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  disabled={actionLoading}
-                  className="px-5 py-2 text-xs font-semibold bg-neutral-950 text-white hover:bg-neutral-800 rounded-lg cursor-pointer shadow-xs"
+                  disabled={submitting || actionLoading}
+                  className="inline-flex items-center gap-2 px-5 py-2 text-xs font-semibold bg-neutral-950 text-white hover:bg-neutral-800 active:scale-[0.99] rounded-lg cursor-pointer shadow-xs disabled:opacity-50"
                 >
-                  {editingEvent ? 'Save Changes' : 'Create Event'}
+                  {submitting && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                  <span>{editingEvent ? (submitting ? 'Saving...' : 'Save Changes') : (submitting ? 'Creating...' : 'Create Event')}</span>
                 </button>
               </div>
             </form>
@@ -460,3 +502,4 @@ export const AdminEventsSection: React.FC<AdminEventsSectionProps> = ({
     </section>
   );
 };
+

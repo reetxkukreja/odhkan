@@ -503,53 +503,182 @@ export async function hasEmailBeenSent(
 }
 
 /**
+ * Renders the Odhkan branded HTML email shell.
+ * Uses safe table-based layout, safe font stacks, and responsive sizing.
+ */
+export function renderOdhkanEmailShell({
+  heading,
+  subheading,
+  bodyHtml,
+  ctaText,
+  ctaUrl,
+  footerNote,
+}: {
+  heading?: string;
+  subheading?: string;
+  bodyHtml: string;
+  ctaText?: string;
+  ctaUrl?: string;
+  footerNote?: string;
+}): string {
+  const appUrl = process.env.APP_URL || 'https://odhkan.com';
+  const actionUrl = ctaUrl || appUrl;
+
+  const ctaButtonHtml = ctaText
+    ? `
+    <table border="0" cellpadding="0" cellspacing="0" style="margin: 24px 0;">
+      <tr>
+        <td align="left">
+          <a href="${actionUrl}" target="_blank" style="display: inline-block; background-color: #E11D48; color: #ffffff; font-size: 14px; font-weight: 600; text-decoration: none; padding: 12px 24px; border-radius: 8px; line-height: 1.2; font-family: Arial, Helvetica, sans-serif;">
+            ${ctaText} &rarr;
+          </a>
+        </td>
+      </tr>
+    </table>`
+    : '';
+
+  return `<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+  <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Odhkan</title>
+  <style type="text/css">
+    body {
+      margin: 0;
+      padding: 0;
+      background-color: #FAF9F6;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+    }
+    table {
+      border-collapse: collapse;
+    }
+    @media only screen and (max-width: 600px) {
+      .card-container {
+        padding: 24px 18px !important;
+      }
+      .heading-title {
+        font-size: 20px !important;
+      }
+    }
+  </style>
+</head>
+<body style="margin: 0; padding: 0; background-color: #FAF9F6;">
+  <table border="0" cellpadding="0" cellspacing="0" width="100%" style="background-color: #FAF9F6; padding: 36px 12px;">
+    <tr>
+      <td align="center">
+        <!-- Main Email Container -->
+        <table border="0" cellpadding="0" cellspacing="0" width="100%" style="max-width: 500px; background-color: #ffffff; border: 1px solid #E5E7EB; border-radius: 12px; overflow: hidden; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);">
+          <tr>
+            <td class="card-container" style="padding: 36px 32px;">
+              
+              <!-- Brand Header -->
+              <div style="font-size: 14px; font-weight: 800; letter-spacing: 0.18em; color: #E11D48; text-transform: uppercase; margin-bottom: 24px; font-family: Arial, Helvetica, sans-serif;">
+                ODHKAN
+              </div>
+
+              ${
+                heading
+                  ? `<h1 class="heading-title" style="margin: 0 0 8px 0; font-size: 22px; font-weight: 700; color: #111827; letter-spacing: -0.02em; line-height: 1.3; font-family: Arial, Helvetica, sans-serif;">${heading}</h1>`
+                  : ''
+              }
+
+              ${
+                subheading
+                  ? `<p style="margin: 0 0 20px 0; font-size: 15px; color: #4B5563; line-height: 1.5; font-family: Arial, Helvetica, sans-serif;">${subheading}</p>`
+                  : ''
+              }
+
+              <!-- Body Content -->
+              <div style="font-size: 15px; line-height: 1.6; color: #374151; font-family: Arial, Helvetica, sans-serif;">
+                ${bodyHtml}
+              </div>
+
+              ${ctaButtonHtml}
+
+              <!-- Email Footer -->
+              <div style="margin-top: 32px; padding-top: 20px; border-top: 1px solid #E5E7EB; font-size: 13px; color: #6B7280; line-height: 1.5; font-family: Arial, Helvetica, sans-serif;">
+                ${footerNote ? `<div style="margin-bottom: 12px; color: #6B7280;">${footerNote}</div>` : ''}
+                <strong style="color: #111827;">Odhkan</strong><br />
+                <span style="color: #6B7280;">Random people. One college. More connections.</span>
+              </div>
+
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
+}
+
+/**
  * RENDER REMINDER EMAIL
- * Subject: Odhkan is happening at <hour>.
+ * Subject: Your Odhkan group goes live in 1 hour
  * Send 1 hour before configured reveal time.
  */
-export function renderReminderEmail(event: OdhkanEvent): { subject: string; text: string; html: string } {
+export function renderReminderEmail(
+  event: OdhkanEvent,
+  participant?: Registration
+): { subject: string; text: string; html: string } {
   const ist = parseISTDate(event.revealTime);
-  const hourNumber = ist.hours % 12 === 0 ? 12 : ist.hours % 12;
   const timeFormatted = ist.timeFormatted; // e.g. "3:00 PM"
+  const firstName = participant?.name ? participant.name.trim().split(/\s+/)[0] : 'there';
+  const appUrl = process.env.APP_URL || 'https://odhkan.com';
 
-  const subject = `Odhkan is happening at ${hourNumber}.`;
+  const subject = 'Your Odhkan group goes live in 1 hour';
 
   const text = `ODHKAN
 
-You're in.
+Your group is almost here.
 
-Your group goes live at ${timeFormatted} today.
+Hi ${firstName},
 
-Keep an eye out.
+Just a little heads-up — your Odhkan group goes live in about an hour.
+Be around when the group is revealed.
 
-See you soon.
+See Odhkan: ${appUrl}
+
+Event Details:
+Event: ${event.name}
+Group reveal: ${timeFormatted} today
+
+---
+Odhkan
+Random people. One college. More connections.
 `;
 
-  const html = `
-<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <style>
-    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #faf9f6; margin: 0; padding: 40px 20px; color: #1a1a1a; }
-    .container { max-width: 480px; margin: 0 auto; background: #ffffff; border: 1px solid #e5e5e5; border-radius: 8px; padding: 36px 32px; }
-    .brand { font-size: 13px; font-weight: 700; letter-spacing: 0.15em; color: #737373; text-transform: uppercase; margin-bottom: 24px; }
-    .heading { font-size: 20px; font-weight: 600; color: #111111; margin: 0 0 16px 0; }
-    .body-text { font-size: 16px; line-height: 1.6; color: #333333; margin: 0 0 16px 0; }
-    .footer { font-size: 14px; color: #737373; margin-top: 24px; padding-top: 16px; border-top: 1px solid #f0f0f0; }
-  </style>
-</head>
-<body>
-  <div class="container">
-    <div class="brand">ODHKAN</div>
-    <div class="heading">You're in.</div>
-    <div class="body-text">Your group goes live at <strong>${timeFormatted}</strong> today.</div>
-    <div class="body-text">Keep an eye out.</div>
-    <div class="footer">See you soon.</div>
-  </div>
-</body>
-</html>
-`;
+  const bodyHtml = `
+    <p style="margin: 0 0 16px 0; font-size: 15px; color: #374151; line-height: 1.6;">
+      Hi ${firstName},
+    </p>
+    <p style="margin: 0 0 16px 0; font-size: 15px; color: #374151; line-height: 1.6;">
+      Just a little heads-up &mdash; your Odhkan group goes live in about an hour.
+    </p>
+    <p style="margin: 0 0 20px 0; font-size: 15px; color: #374151; line-height: 1.6;">
+      Be around when the group is revealed.
+    </p>
+
+    <div style="background-color: #F9FAFB; border: 1px solid #E5E7EB; border-radius: 8px; padding: 16px 20px; margin: 24px 0 8px 0;">
+      <div style="font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: #6B7280; margin-bottom: 8px;">Event Information</div>
+      <div style="font-size: 14px; color: #111827; margin-bottom: 6px;">
+        <span style="color: #6B7280;">Event:</span> <strong style="color: #111827;">${event.name}</strong>
+      </div>
+      <div style="font-size: 14px; color: #111827;">
+        <span style="color: #6B7280;">Group reveal:</span> <strong style="color: #111827;">${timeFormatted} today</strong>
+      </div>
+    </div>
+  `;
+
+  const html = renderOdhkanEmailShell({
+    heading: 'Your group is almost here.',
+    bodyHtml,
+    ctaText: 'See Odhkan',
+    ctaUrl: appUrl,
+  });
 
   return { subject, text, html };
 }
@@ -564,8 +693,9 @@ export async function renderRevealEmail(
   allEventGroups: Group[],
   allRegistrations: Registration[]
 ): Promise<{ subject: string; text: string; html: string }> {
-  const ist = parseISTDate(event.revealTime);
-  const subject = `Your Odhkan Group is Live — ${ist.timeFormatted}`;
+  const firstName = participant.name.trim().split(/\s+/)[0];
+  const appUrl = process.env.APP_URL || 'https://odhkan.com';
+  const subject = 'Your Odhkan group is here 🎉';
 
   // Find other members of this participant's group
   const memberRegs = group.memberIds
@@ -573,25 +703,27 @@ export async function renderRevealEmail(
     .map(mId => allRegistrations.find(r => r.id === mId))
     .filter(Boolean) as Registration[];
 
-  // Format group members (Name — Batch/Year)
+  // Format group members (Name — Batch/Year). Note: Strict privacy - never disclose roll number, phone, or email.
   const groupLines = memberRegs.map(m => {
     const formattedBatch = m.batch.startsWith('20') ? m.batch : `20${m.batch.slice(0, 2)}`;
-    return `${m.name} — ${formattedBatch}`;
+    return `${m.name} — Batch ${formattedBatch}`;
   });
 
   // Determine participant's Odhkan history across all published events
   const allEvents = await db.getEvents();
   const publishedEvents = allEvents.filter(e => e.isPublished || e.status === 'completed');
   const pastEventsJoined = allRegistrations.filter(
-    r => r.rollNumber === participant.rollNumber &&
-         (r.status === 'active' || r.status === 'valid') &&
-         r.groupId &&
-         r.eventId !== event.id
+    r =>
+      r.rollNumber === participant.rollNumber &&
+      (r.status === 'active' || r.status === 'valid') &&
+      r.groupId &&
+      r.eventId !== event.id
   );
 
   const participationCount = pastEventsJoined.length + 1; // including this one
   const isFirstTime = pastEventsJoined.length === 0;
-  const isFinalOdhkan = event.name.toLowerCase().includes('final') || (publishedEvents.length >= 4 && participationCount >= 4);
+  const isFinalOdhkan =
+    event.name.toLowerCase().includes('final') || (publishedEvents.length >= 4 && participationCount >= 4);
 
   // Personalized opening copy
   let openingCopy = '';
@@ -639,62 +771,172 @@ export async function renderRevealEmail(
   const textParts = [
     'ODHKAN',
     '',
-    openingCopy,
+    'Your group is here.',
+    '',
+    `Hi ${firstName},`,
+    '',
+    "It's time to meet your people.",
+    openingCopy ? `\n${openingCopy}` : '',
     pastGroupMention ? `\n${pastGroupMention}` : '',
     '',
-    nameRhyme,
-    '',
-    'Your Odhkan group:',
-    ...groupLines,
+    nameRhyme ? `"${nameRhyme}"\n` : '',
+    'YOUR ODHKAN GROUP:',
+    ...groupLines.map(g => `• ${g}`),
     '',
     'Go find them.',
     '',
     "Can't find them around campus? You can use the Odhkan website to contact your group.",
+    '',
+    `Meet your people: ${appUrl}`,
+    '',
+    '---',
+    'Odhkan',
+    'Random people. One college. More connections.',
   ].filter(Boolean);
 
   const text = textParts.join('\n');
 
-  // Assemble HTML
-  const groupHtml = groupLines
-    .map(g => `<div style="font-size: 16px; font-weight: 500; color: #111; margin-bottom: 8px;">${g}</div>`)
+  // Build group rows HTML
+  const memberRowsHtml = memberRegs
+    .map((m, idx) => {
+      const formattedBatch = m.batch.startsWith('20') ? m.batch : `20${m.batch.slice(0, 2)}`;
+      const isLast = idx === memberRegs.length - 1;
+      return `
+        <div style="padding: 10px 0; ${isLast ? '' : 'border-bottom: 1px solid #F3F4F6;'} font-size: 15px; color: #111827;">
+          <span style="font-weight: 600; color: #111827;">${m.name}</span>
+          <span style="color: #6B7280; font-size: 13px; margin-left: 6px;">&bull; Batch ${formattedBatch}</span>
+        </div>
+      `;
+    })
     .join('');
 
-  const html = `
-<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <style>
-    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #faf9f6; margin: 0; padding: 40px 20px; color: #1a1a1a; }
-    .container { max-width: 480px; margin: 0 auto; background: #ffffff; border: 1px solid #e5e5e5; border-radius: 8px; padding: 36px 32px; }
-    .brand { font-size: 13px; font-weight: 700; letter-spacing: 0.15em; color: #737373; text-transform: uppercase; margin-bottom: 24px; }
-    .intro { font-size: 16px; line-height: 1.6; color: #333333; margin-bottom: 20px; white-space: pre-line; }
-    .past-mention { font-size: 14px; color: #666; margin-bottom: 20px; font-style: italic; }
-    .rhyme-box { background: #fbf8f3; border-left: 3px solid #d97706; padding: 14px 16px; border-radius: 4px; font-size: 15px; font-weight: 500; color: #78350f; line-height: 1.5; margin-bottom: 24px; white-space: pre-line; }
-    .group-section { background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 6px; padding: 20px; margin-bottom: 24px; }
-    .group-title { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: #6b7280; margin-bottom: 12px; }
-    .callout { font-size: 17px; font-weight: 600; color: #111; margin-bottom: 12px; }
-    .footer { font-size: 13px; color: #737373; line-height: 1.5; margin-top: 24px; padding-top: 16px; border-top: 1px solid #f0f0f0; }
-  </style>
-</head>
-<body>
-  <div class="container">
-    <div class="brand">ODHKAN</div>
-    <div class="intro">${openingCopy}</div>
-    ${pastGroupMention ? `<div class="past-mention">${pastGroupMention}</div>` : ''}
-    <div class="rhyme-box">${nameRhyme}</div>
-    <div class="group-section">
-      <div class="group-title">Your Odhkan group:</div>
-      ${groupHtml}
+  const bodyHtml = `
+    <p style="margin: 0 0 14px 0; font-size: 15px; color: #374151; line-height: 1.6;">
+      Hi ${firstName},
+    </p>
+    <p style="margin: 0 0 16px 0; font-size: 15px; color: #374151; line-height: 1.6;">
+      It's time to meet your people.
+    </p>
+    ${
+      openingCopy
+        ? `<p style="margin: 0 0 14px 0; font-size: 15px; color: #374151; line-height: 1.6;">${openingCopy}</p>`
+        : ''
+    }
+    ${
+      pastGroupMention
+        ? `<p style="margin: 0 0 16px 0; font-size: 14px; color: #6B7280; font-style: italic; line-height: 1.5;">${pastGroupMention}</p>`
+        : ''
+    }
+
+    ${
+      nameRhyme
+        ? `<div style="background-color: #FFF1F2; border-left: 3px solid #E11D48; padding: 12px 16px; border-radius: 6px; font-size: 14px; font-weight: 500; color: #9F1239; line-height: 1.5; margin: 20px 0; white-space: pre-line;">${nameRhyme}</div>`
+        : ''
+    }
+
+    <div style="background-color: #F9FAFB; border: 1px solid #E5E7EB; border-radius: 8px; padding: 18px 20px; margin: 24px 0 20px 0;">
+      <div style="font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: #6B7280; margin-bottom: 12px;">YOUR GROUP</div>
+      ${memberRowsHtml || '<div style="font-size: 14px; color: #6B7280;">Group members assigned.</div>'}
     </div>
-    <div class="callout">Go find them.</div>
-    <div class="footer">Can't find them around campus? You can use the Odhkan website to contact your group.</div>
-  </div>
-</body>
-</html>
-`;
+
+    <div style="font-size: 16px; font-weight: 600; color: #111827; margin: 20px 0 6px 0;">
+      Go find them.
+    </div>
+    <p style="font-size: 13px; color: #6B7280; line-height: 1.5; margin: 0 0 8px 0;">
+      Can't find them around campus? You can use the Odhkan website to contact your group.
+    </p>
+  `;
+
+  const html = renderOdhkanEmailShell({
+    heading: 'Your group is here.',
+    bodyHtml,
+    ctaText: 'Meet your people',
+    ctaUrl: appUrl,
+  });
 
   return { subject, text, html };
+}
+
+/**
+ * Helper to dynamically look up a participant from the database for test previews.
+ */
+export async function findParticipantForPreview(
+  queryInput: string,
+  eventId?: string
+): Promise<{
+  participant?: Registration;
+  event: OdhkanEvent;
+  error?: string;
+}> {
+  const event = eventId ? ((await db.getEventById(eventId)) || (await db.getActiveEvent())) : await db.getActiveEvent();
+
+  if (!event) {
+    return { event: null as any, error: 'No active event found.' };
+  }
+
+  const q = (queryInput || '').trim().toLowerCase();
+  const eventRegs = await db.getEventRegistrations(event.id);
+  const allRegs = await db.getAllRegistrations();
+
+  if (!q) {
+    return { event, error: 'Please enter a registered participant email, roll number, or name.' };
+  }
+
+  // 1. Search in target event registrations
+  let participant = eventRegs.find(r => {
+    const rollEmail = `${r.rollNumber.toLowerCase()}@college.edu`;
+    return (
+      r.id.toLowerCase() === q ||
+      r.rollNumber.toLowerCase() === q ||
+      rollEmail === q ||
+      (r.phoneNumber && r.phoneNumber.toLowerCase() === q) ||
+      r.name.toLowerCase() === q ||
+      r.name.toLowerCase().includes(q)
+    );
+  });
+
+  // 2. If not found in this event, check other events
+  if (!participant) {
+    const foundOther = allRegs.find(r => {
+      const rollEmail = `${r.rollNumber.toLowerCase()}@college.edu`;
+      return (
+        r.id.toLowerCase() === q ||
+        r.rollNumber.toLowerCase() === q ||
+        rollEmail === q ||
+        (r.phoneNumber && r.phoneNumber.toLowerCase() === q) ||
+        r.name.toLowerCase() === q
+      );
+    });
+
+    if (foundOther) {
+      return {
+        event,
+        error: `Participant "${foundOther.name}" (${foundOther.rollNumber}) is found in the system but is not registered for ${event.name}.`,
+      };
+    }
+
+    return {
+      event,
+      error: `Participant not found for "${queryInput}". Please enter a registered participant email or roll number.`,
+    };
+  }
+
+  // 3. Status checks
+  if (participant.status === 'withdrawn') {
+    return {
+      event,
+      error: `Participant "${participant.name}" is withdrawn from ${event.name}.`,
+    };
+  }
+
+  if (participant.status !== 'active' && participant.status !== 'valid') {
+    return {
+      event,
+      error: `Participant "${participant.name}" has status "${participant.status}" and cannot receive group emails.`,
+    };
+  }
+
+  return { participant, event };
 }
 
 /**
@@ -712,14 +954,12 @@ export async function dispatchReminderEmails(eventId?: string): Promise<{
     : await db.getActiveEvent();
 
   const registrations = await db.getEventRegistrations(targetEvent.id);
-  const eligible = registrations.filter(r => (r.status === 'active' || r.status === 'valid'));
+  const eligible = registrations.filter(r => r.status === 'active' || r.status === 'valid');
 
   let totalSent = 0;
   let totalFailed = 0;
   let skippedCount = 0;
   const errors: string[] = [];
-
-  const template = renderReminderEmail(targetEvent);
 
   for (const reg of eligible) {
     const alreadySent = await hasEmailBeenSent(targetEvent.id, reg.id, 'reminder');
@@ -728,6 +968,7 @@ export async function dispatchReminderEmails(eventId?: string): Promise<{
       continue;
     }
 
+    const template = renderReminderEmail(targetEvent, reg);
     const email = getRecipientEmail(reg.rollNumber, reg.phoneNumber);
     const result = await sendEmailDirectly({
       to: email,
@@ -1006,11 +1247,21 @@ export async function retryFailedEmails(): Promise<{ retriedCount: number; succe
 }
 
 /**
- * Send a test preview email to an admin-specified address.
+ * Send a test preview email to an admin-specified address with dynamic participant data.
+ * NEVER uses hardcoded/sample participant data.
  */
 export async function sendTestEmail(
-  targetEmail: string,
-  type: 'reminder' | 'reveal'
+  targetEmailOrParams:
+    | string
+    | {
+        targetEmail: string;
+        type: 'reminder' | 'reveal';
+        participantQuery?: string;
+        eventId?: string;
+      },
+  legacyType?: 'reminder' | 'reveal',
+  legacyParticipantQuery?: string,
+  legacyEventId?: string
 ): Promise<{
   success: boolean;
   status: 'sent' | 'delivered' | 'failed' | 'simulated';
@@ -1018,75 +1269,94 @@ export async function sendTestEmail(
   error?: string;
   messageId?: string;
   details?: string;
+  previewData?: {
+    participantName: string;
+    participantRoll: string;
+    eventName: string;
+  };
 }> {
-  const activeEvent = await db.getActiveEvent();
+  let targetEmail: string;
+  let type: 'reminder' | 'reveal';
+  let participantQuery: string | undefined;
+  let eventId: string | undefined;
+
+  if (typeof targetEmailOrParams === 'object') {
+    targetEmail = targetEmailOrParams.targetEmail;
+    type = targetEmailOrParams.type;
+    participantQuery = targetEmailOrParams.participantQuery;
+    eventId = targetEmailOrParams.eventId;
+  } else {
+    targetEmail = targetEmailOrParams;
+    type = legacyType || 'reminder';
+    participantQuery = legacyParticipantQuery;
+    eventId = legacyEventId;
+  }
+
+  const activeEvent = eventId
+    ? ((await db.getEventById(eventId)) || (await db.getActiveEvent()))
+    : await db.getActiveEvent();
+
+  if (!activeEvent) {
+    return {
+      success: false,
+      status: 'failed',
+      provider: 'smtp',
+      error: 'No active event found to generate preview.',
+    };
+  }
+
+  // 1. Resolve participant dynamically
+  const queryStr = (participantQuery || '').trim() || targetEmail.trim();
+  const resLookup = await findParticipantForPreview(queryStr, activeEvent.id);
 
   let template: { subject: string; text: string; html: string };
+  let previewParticipant: Registration | undefined;
 
   if (type === 'reminder') {
-    template = renderReminderEmail(activeEvent);
+    if (resLookup.participant) {
+      previewParticipant = resLookup.participant;
+      template = renderReminderEmail(activeEvent, previewParticipant);
+    } else {
+      // If participantQuery was explicitly passed and not found, report error
+      if (participantQuery && participantQuery.trim()) {
+        return {
+          success: false,
+          status: 'failed',
+          provider: 'smtp',
+          error: resLookup.error || `Participant "${participantQuery}" not found in event ${activeEvent.name}.`,
+        };
+      }
+      // Otherwise render general reminder
+      template = renderReminderEmail(activeEvent);
+    }
   } else {
-    // Test reveal email
-    const sampleParticipant: Registration = {
-      id: 'test_p1',
-      name: 'Reet Kukreja',
-      rollNumber: '24BD1234',
-      batch: '2024',
-      phoneNumber: '9876543210',
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-      registeredAt: Date.now(),
-      status: 'active',
-      groupAssigned: true,
-      groupId: 'test_grp_1',
-      revealed: true,
-      eventId: activeEvent.id,
-    };
+    // Reveal email preview REQUIRES dynamic participant lookup
+    if (!resLookup.participant) {
+      return {
+        success: false,
+        status: 'failed',
+        provider: 'smtp',
+        error:
+          resLookup.error ||
+          'Test reveal preview requires a registered participant. Enter a registered participant email or roll number.',
+      };
+    }
 
-    const sampleGroup: Group = {
-      id: 'test_grp_1',
-      name: 'Group 01',
-      memberIds: ['test_p1', 'test_p2', 'test_p3'],
-      createdAt: Date.now(),
-      locked: true,
-      eventId: activeEvent.id,
-    };
+    previewParticipant = resLookup.participant;
+    const allGroups = await db.getEventGroups(activeEvent.id);
+    const participantGroup = allGroups.find(g => g.id === previewParticipant?.groupId);
 
-    const sampleAllRegs: Registration[] = [
-      sampleParticipant,
-      {
-        id: 'test_p2',
-        name: 'Aarav Shah',
-        rollNumber: '23BD5678',
-        batch: '2023',
-        phoneNumber: '9876543211',
-        createdAt: Date.now(),
-        updatedAt: Date.now(),
-        registeredAt: Date.now(),
-        status: 'active',
-        groupAssigned: true,
-        groupId: 'test_grp_1',
-        revealed: true,
-        eventId: activeEvent.id,
-      },
-      {
-        id: 'test_p3',
-        name: 'Mehak Verma',
-        rollNumber: '25BD9012',
-        batch: '2025',
-        phoneNumber: '9876543212',
-        createdAt: Date.now(),
-        updatedAt: Date.now(),
-        registeredAt: Date.now(),
-        status: 'active',
-        groupAssigned: true,
-        groupId: 'test_grp_1',
-        revealed: true,
-        eventId: activeEvent.id,
-      },
-    ];
+    if (!participantGroup) {
+      return {
+        success: false,
+        status: 'failed',
+        provider: 'smtp',
+        error: `Participant "${previewParticipant.name}" does not have an assigned group in ${activeEvent.name}. Mix groups or assign a group first.`,
+      };
+    }
 
-    template = await renderRevealEmail(activeEvent, sampleParticipant, sampleGroup, [sampleGroup], sampleAllRegs);
+    const allRegs = await db.getAllRegistrations();
+    template = await renderRevealEmail(activeEvent, previewParticipant, participantGroup, allGroups, allRegs);
   }
 
   const res = await sendEmailDirectly({
@@ -1096,11 +1366,12 @@ export async function sendTestEmail(
     html: template.html,
   });
 
+  const previewParticipantName = previewParticipant?.name || 'General';
   await recordEmailLog({
     eventId: activeEvent.id,
     eventName: activeEvent.name,
     recipientEmail: targetEmail,
-    recipientName: 'Test Admin',
+    recipientName: `[Preview: ${previewParticipantName}]`,
     emailType: 'test',
     status: res.status,
     provider: res.provider,
@@ -1111,7 +1382,16 @@ export async function sendTestEmail(
     sentAt: res.success ? Date.now() : null,
   });
 
-  return res;
+  return {
+    ...res,
+    previewData: previewParticipant
+      ? {
+          participantName: previewParticipant.name,
+          participantRoll: previewParticipant.rollNumber,
+          eventName: activeEvent.name,
+        }
+      : undefined,
+  };
 }
 
 /**

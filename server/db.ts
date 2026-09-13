@@ -563,33 +563,65 @@ class Database {
 
   public async createEvent(data: {
     name?: string;
-    date: string; // "YYYY-MM-DD" e.g. "2026-09-19"
-    time: string; // "HH:mm" e.g. "15:00"
-    registrationEnd?: string;
+    date?: string; // "YYYY-MM-DD" e.g. "2026-09-19"
+    time?: string; // "HH:mm" e.g. "15:00"
+    revealTime?: string;
+    eventDate?: string;
+    registrationStart?: string | null;
+    registrationEnd?: string | null;
+    status?: string;
   }): Promise<OdhkanEvent> {
-    const revealTime = istToUtcIso(data.date, data.time);
+    let revealTime: string;
+    if (data.revealTime && typeof data.revealTime === 'string') {
+      const parsed = parseISTDate(data.revealTime);
+      revealTime = istToUtcIso(parsed.dateInput, parsed.timeInput);
+    } else {
+      const rawDate = data.date || data.eventDate || '2026-09-19';
+      const rawTime = data.time || '15:00';
+      revealTime = istToUtcIso(rawDate, rawTime);
+    }
+
     const ist = parseISTDate(revealTime);
     const now = Date.now();
-    const eventId = `evt_${data.date.replace(/-/g, '_')}_${Math.random().toString(36).substring(2, 6)}`;
+    const cleanDateStr = ist.dateInput.replace(/-/g, '_');
+    const eventId = `evt_${cleanDateStr}_${Math.random().toString(36).substring(2, 6)}`;
     const eventName = data.name?.trim() || `Odhkan - ${ist.dayName}, ${ist.dateFormatted}`;
 
+    let regStart = data.registrationStart;
+    if (regStart && typeof regStart === 'string') {
+      regStart = regStart.includes('T') ? new Date(regStart).toISOString() : istToUtcIso(regStart, '00:00');
+    } else {
+      regStart = new Date(now).toISOString();
+    }
+
     let regEnd = data.registrationEnd;
-    if (!regEnd) {
+    if (regEnd && typeof regEnd === 'string') {
+      regEnd = regEnd.includes('T') ? new Date(regEnd).toISOString() : istToUtcIso(regEnd, '23:59');
+    } else {
       // Default to 30 mins before reveal
       const revealMs = new Date(revealTime).getTime();
       regEnd = new Date(revealMs - 30 * 60 * 1000).toISOString();
     }
 
+    if (regStart && regEnd) {
+      if (new Date(regEnd).getTime() < new Date(regStart).getTime()) {
+        throw new Error('Registration end date cannot be earlier than registration start date.');
+      }
+    }
+
+    const eventStatus = data.status || 'open';
+    const isRegOpen = eventStatus === 'open' || eventStatus === 'upcoming';
+
     const newEvent: OdhkanEvent = {
       id: eventId,
       name: eventName,
-      eventDate: data.date,
+      eventDate: ist.dateInput,
       revealTime,
-      registrationStart: new Date(now).toISOString(),
+      registrationStart: regStart,
       registrationEnd: regEnd,
-      status: 'upcoming',
+      status: eventStatus as any,
       stage: 'REGISTRATION_OPEN',
-      registrationOpen: true,
+      registrationOpen: isRegOpen,
       groupsLocked: false,
       isPublished: false,
       publishedAt: null,
@@ -636,7 +668,10 @@ class Database {
       name?: string;
       date?: string;
       time?: string;
-      registrationEnd?: string;
+      revealTime?: string;
+      eventDate?: string;
+      registrationStart?: string | null;
+      registrationEnd?: string | null;
       status?: string;
       registrationOpen?: boolean;
     }
@@ -648,19 +683,78 @@ class Database {
 
     let updatedReveal = existing.revealTime;
     let updatedDate = existing.eventDate;
-    if (data.date && data.time) {
-      updatedReveal = istToUtcIso(data.date, data.time);
-      updatedDate = data.date;
+
+    // Check if new timing is proposed
+    let proposedReveal: string | null = null;
+    let proposedDate: string | null = null;
+
+    if (data.revealTime && typeof data.revealTime === 'string') {
+      const parsed = parseISTDate(data.revealTime);
+      proposedReveal = istToUtcIso(parsed.dateInput, parsed.timeInput);
+      proposedDate = parsed.dateInput;
+    } else if (data.date && data.time) {
+      proposedReveal = istToUtcIso(data.date, data.time);
+      proposedDate = parseISTDate(proposedReveal).dateInput;
     } else if (data.date) {
       const prevIst = parseISTDate(existing.revealTime);
-      updatedReveal = istToUtcIso(data.date, `${String(prevIst.hours).padStart(2, '0')}:${String(prevIst.minutes).padStart(2, '0')}`);
-      updatedDate = data.date;
+      proposedReveal = istToUtcIso(
+        data.date,
+        `${String(prevIst.hours).padStart(2, '0')}:${String(prevIst.minutes).padStart(2, '0')}`
+      );
+      proposedDate = parseISTDate(proposedReveal).dateInput;
+    }
+
+    // Historical integrity rule: if event is published or groups are locked, reject changing reveal timing
+    const isLockedOrPublished = existing.isPublished || existing.groupsLocked || existing.status === 'completed';
+    if (proposedReveal && proposedReveal !== existing.revealTime) {
+      if (isLockedOrPublished) {
+        throw new Error(
+          'Event reveal timing and date cannot be modified once groups are locked or results are published.'
+        );
+      }
+      updatedReveal = proposedReveal;
+      updatedDate = proposedDate || parseISTDate(updatedReveal).dateInput;
+    } else if (proposedDate && proposedDate !== existing.eventDate) {
+      if (isLockedOrPublished) {
+        throw new Error(
+          'Event date cannot be modified once groups are locked or results are published.'
+        );
+      }
+      updatedDate = proposedDate;
+    }
+
+    let updatedRegStart = existing.registrationStart;
+    if (data.registrationStart !== undefined) {
+      if (data.registrationStart && typeof data.registrationStart === 'string') {
+        updatedRegStart = data.registrationStart.includes('T')
+          ? new Date(data.registrationStart).toISOString()
+          : istToUtcIso(data.registrationStart, '00:00');
+      } else {
+        updatedRegStart = null;
+      }
+    }
+
+    let updatedRegEnd = existing.registrationEnd;
+    if (data.registrationEnd !== undefined) {
+      if (data.registrationEnd && typeof data.registrationEnd === 'string') {
+        updatedRegEnd = data.registrationEnd.includes('T')
+          ? new Date(data.registrationEnd).toISOString()
+          : istToUtcIso(data.registrationEnd, '23:59');
+      } else {
+        updatedRegEnd = null;
+      }
+    }
+
+    if (updatedRegStart && updatedRegEnd) {
+      if (new Date(updatedRegEnd).getTime() < new Date(updatedRegStart).getTime()) {
+        throw new Error('Registration end date cannot be earlier than registration start date.');
+      }
     }
 
     const updatedName = data.name !== undefined ? data.name.trim() : existing.name;
     const updatedStatus = (data.status || existing.status) as any;
-    const updatedRegOpen = data.registrationOpen !== undefined ? data.registrationOpen : existing.registrationOpen;
-    const updatedRegEnd = data.registrationEnd !== undefined ? data.registrationEnd : existing.registrationEnd;
+    const updatedRegOpen =
+      data.registrationOpen !== undefined ? data.registrationOpen : existing.registrationOpen;
     const now = Date.now();
 
     if (isPostgresConfigured()) {
@@ -669,15 +763,17 @@ class Database {
            name = $1,
            event_date = $2,
            reveal_time = $3,
-           registration_end = $4,
-           status = $5,
-           registration_open = $6,
-           updated_at = $7
-         WHERE id = $8;`,
+           registration_start = $4,
+           registration_end = $5,
+           status = $6,
+           registration_open = $7,
+           updated_at = $8
+         WHERE id = $9;`,
         [
           updatedName,
           updatedDate,
           updatedReveal,
+          updatedRegStart,
           updatedRegEnd,
           updatedStatus,
           updatedRegOpen,
@@ -698,6 +794,7 @@ class Database {
       existing.name = updatedName;
       existing.eventDate = updatedDate;
       existing.revealTime = updatedReveal;
+      existing.registrationStart = updatedRegStart;
       existing.registrationEnd = updatedRegEnd;
       existing.status = updatedStatus;
       existing.registrationOpen = updatedRegOpen;

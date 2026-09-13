@@ -35,6 +35,7 @@ export const AdminEmailSection: React.FC<AdminEmailSectionProps> = ({
 
   // Test email modal/inputs
   const [testEmailAddress, setTestEmailAddress] = useState('');
+  const [testParticipantQuery, setTestParticipantQuery] = useState('');
   const [testEmailType, setTestEmailType] = useState<'reminder' | 'reveal'>('reminder');
   const [logFilter, setLogFilter] = useState<'ALL' | 'reminder' | 'reveal' | 'failed' | 'sent' | 'delivered'>('ALL');
   const [searchQuery, setSearchQuery] = useState('');
@@ -176,12 +177,25 @@ export const AdminEmailSection: React.FC<AdminEmailSectionProps> = ({
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token || ''}`,
         },
-        body: JSON.stringify({ email: testEmailAddress, type: testEmailType }),
+        body: JSON.stringify({
+          email: testEmailAddress,
+          type: testEmailType,
+          participantQuery: testParticipantQuery,
+          eventId: selectedEvent?.id,
+        }),
       });
       const json = await res.json();
       if (json.success) {
-        const statusLabel = json.status === 'sent' ? 'Accepted by server/provider (Status: Sent)' : json.status === 'simulated' ? 'Simulated Preview (Logged to server console)' : 'Dispatched';
-        showFeedback('success', `Test email to ${testEmailAddress}: ${statusLabel}.`);
+        const statusLabel =
+          json.status === 'sent'
+            ? 'Accepted by SMTP server (Status: Sent)'
+            : json.status === 'simulated'
+            ? 'Simulated Preview (Logged to server console)'
+            : 'Dispatched';
+        const previewMsg = json.previewData
+          ? ` (Previewed as ${json.previewData.participantName} • ${json.previewData.eventName})`
+          : '';
+        showFeedback('success', `Test email sent to ${testEmailAddress}${previewMsg}: ${statusLabel}.`);
         fetchEmailData();
       } else {
         showFeedback('error', json.error || 'Failed to send test email.');
@@ -416,32 +430,57 @@ export const AdminEmailSection: React.FC<AdminEmailSectionProps> = ({
                   Send Test Preview
                 </span>
               </div>
+              <p className="text-[11px] text-neutral-500 mb-2.5">
+                Renders live emails with dynamic participant data &amp; assigned group rhyme.
+              </p>
               <div className="space-y-2 mb-3">
-                <input
-                  type="email"
-                  placeholder="admin@college.edu"
-                  value={testEmailAddress}
-                  onChange={(e) => setTestEmailAddress(e.target.value)}
-                  className="w-full px-2.5 py-1.5 text-xs bg-white border border-neutral-300 rounded-lg focus:outline-none focus:border-black"
-                  required
-                />
-                <select
-                  value={testEmailType}
-                  onChange={(e) => setTestEmailType(e.target.value as any)}
-                  className="w-full px-2.5 py-1.5 text-xs bg-white border border-neutral-300 rounded-lg focus:outline-none focus:border-black font-medium"
-                >
-                  <option value="reminder">Reminder Email Preview</option>
-                  <option value="reveal">Group Reveal Email Preview (with rhyme)</option>
-                </select>
+                <div>
+                  <label className="block text-[10px] font-bold text-neutral-600 uppercase tracking-wider mb-1">
+                    Deliver Test To:
+                  </label>
+                  <input
+                    type="email"
+                    placeholder="e.g. your email / inbox"
+                    value={testEmailAddress}
+                    onChange={(e) => setTestEmailAddress(e.target.value)}
+                    className="w-full px-2.5 py-1.5 text-xs bg-white border border-neutral-300 rounded-lg focus:outline-none focus:border-black"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold text-neutral-600 uppercase tracking-wider mb-1">
+                    Preview As Participant:
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="Roll no, email, or name"
+                    value={testParticipantQuery}
+                    onChange={(e) => setTestParticipantQuery(e.target.value)}
+                    className="w-full px-2.5 py-1.5 text-xs bg-white border border-neutral-300 rounded-lg focus:outline-none focus:border-black"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold text-neutral-600 uppercase tracking-wider mb-1">
+                    Email Template:
+                  </label>
+                  <select
+                    value={testEmailType}
+                    onChange={(e) => setTestEmailType(e.target.value as any)}
+                    className="w-full px-2.5 py-1.5 text-xs bg-white border border-neutral-300 rounded-lg focus:outline-none focus:border-black font-medium"
+                  >
+                    <option value="reminder">Reminder Email (1-hr countdown)</option>
+                    <option value="reveal">Group Reveal (with personalized rhyme)</option>
+                  </select>
+                </div>
               </div>
             </div>
             <button
               type="submit"
               disabled={actionLoading}
-              className="w-full inline-flex items-center justify-center gap-1.5 text-xs font-semibold px-3 py-2 bg-white border border-neutral-300 text-neutral-800 rounded-lg hover:bg-neutral-50 disabled:opacity-40 transition-colors cursor-pointer"
+              className="w-full inline-flex items-center justify-center gap-1.5 text-xs font-semibold px-3 py-2 bg-neutral-900 text-white rounded-lg hover:bg-neutral-800 disabled:opacity-40 transition-colors cursor-pointer shadow-xs"
             >
               <Send className="w-3.5 h-3.5" />
-              <span>Send Test Preview</span>
+              <span>Send Dynamic Test Preview</span>
             </button>
           </form>
         </div>

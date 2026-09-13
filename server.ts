@@ -605,13 +605,18 @@ app.post('/api/admin/emails/retry-failed', requireAdminAuth, async (req: Request
 
 // Send test preview email
 app.post('/api/admin/emails/test', requireAdminAuth, async (req: Request, res: Response) => {
-  const { email, type } = req.body;
+  const { email, type, participantQuery, participantEmail, eventId } = req.body;
   if (!email || !email.includes('@')) {
-    return res.status(400).json({ success: false, error: 'Please enter a valid email address.' });
+    return res.status(400).json({ success: false, error: 'Please enter a valid recipient email address.' });
   }
   try {
     const { sendTestEmail } = await import('./server/email');
-    const result = await sendTestEmail(email, type === 'reveal' ? 'reveal' : 'reminder');
+    const result = await sendTestEmail({
+      targetEmail: email,
+      type: type === 'reveal' ? 'reveal' : 'reminder',
+      participantQuery: participantQuery || participantEmail,
+      eventId,
+    });
     res.json(result);
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
